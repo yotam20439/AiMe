@@ -63,10 +63,10 @@ export default function OnboardingClient() {
       <p className="lead">Your digital life is full of information. AiMe turns it into action — bills, replies, appointments, the small things that fall through the cracks.</p>
       {household && (
         <div className="conn-row">
-          <span className="logo">🏠</span>
+          <span className="logo">🔗</span>
           <div className="grow">
-            <b>{household.name}</b>
-            <small>Invite code for a partner or family member: <code>{household.inviteCode}</code></small>
+            <b>Want to share this with someone?</b>
+            <small>They can join anytime with this code — no rush: <code>{household.inviteCode}</code></small>
           </div>
         </div>
       )}

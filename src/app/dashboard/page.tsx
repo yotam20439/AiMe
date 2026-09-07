@@ -42,7 +42,7 @@ export default function Dashboard() {
         <b>AiMe</b>
         <span style={{ color: "var(--text-2)", fontSize: 13 }}>{session?.user?.name}</span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/household">Household</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/household">Account</Link>
         <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>Sign out</button>
       </div>
       <div className="content">

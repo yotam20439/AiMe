@@ -1,0 +1,35 @@
+[1mdiff --git a/src/app/signup/page.tsx b/src/app/signup/page.tsx[m
+[1mindex d729417..0aebd33 100644[m
+[1m--- a/src/app/signup/page.tsx[m
+[1m+++ b/src/app/signup/page.tsx[m
+[36m@@ -39,11 +39,11 @@[m [mexport default function SignupPage() {[m
+     <div className="shell">[m
+       <form className="panel" onSubmit={submit}>[m
+         <h1>Create your account</h1>[m
+[31m-        <p className="lead">One household can hold a couple of people, each with their own login.</p>[m
+[32m+[m[32m        <p className="lead">Set this up just for yourself, or share it with a partner or family member — either way works.</p>[m
+         {error && <div className="error">{error}</div>}[m
+         <div className="seg">[m
+[31m-          <button type="button" className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>Start a household</button>[m
+[31m-          <button type="button" className={mode === "join" ? "on" : ""} onClick={() => setMode("join")}>Join with a code</button>[m
+[32m+[m[32m          <button type="button" className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>Create my account</button>[m
+[32m+[m[32m          <button type="button" className={mode === "join" ? "on" : ""} onClick={() => setMode("join")}>Join someone else's</button>[m
+         </div>[m
+         <div className="field">[m
+           <label>Your name</label>[m
+[36m@@ -59,12 +59,12 @@[m [mexport default function SignupPage() {[m
+         </div>[m
+         {mode === "create" ? ([m
+           <div className="field">[m
+[31m-            <label>Household name (e.g. "The Cohens")</label>[m
+[31m-            <input className="input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder="Optional" />[m
+[32m+[m[32m            <label>Name for this account (optional)</label>[m
+[32m+[m[32m            <input className="input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder={`e.g. "${name || "Alex"}" or "The Cohens" — only needed if you'll invite someone`} />[m
+           </div>[m
+         ) : ([m
+           <div className="field">[m
+[31m-            <label>Invite code from whoever set up your household</label>[m
+[32m+[m[32m            <label>Invite code from whoever set this up</label>[m
+             <input className="input" required value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} />[m
+           </div>[m
+         )}[m

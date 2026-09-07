@@ -19,15 +19,18 @@ export default function HouseholdPage() {
         <Link className="btn" style={{ width: "auto" }} href="/dashboard">Back to Today</Link>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Household</h1>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Account &amp; sharing</h1>
         {household && (
           <>
             <p style={{ color: "var(--text-2)" }}>
-              Share this code with a partner or family member. When they sign up and choose
-              "Join with a code," they'll land in the same household with their own login and
-              their own connected accounts.
+              {household.members.length > 1
+                ? "Everyone below shares this account, each with their own login and their own connected services."
+                : "It's just you here — nothing else to set up. If you ever want to share this with a partner or family member, send them this code:"}
             </p>
-            <div className="code-box" style={{ marginBottom: 20 }}>{household.inviteCode}</div>
+            <div className="code-box" style={{ marginBottom: 8 }}>{household.inviteCode}</div>
+            <p style={{ color: "var(--text-3)", fontSize: 12.5, marginTop: 0, marginBottom: 20 }}>
+              They'll sign up and choose "Join someone else's," using this code.
+            </p>
             {household.members.map((m) => (
               <div className="row" key={m.id}>
                 <div className="t"><b>{m.name}</b><small>{m.email} · {m.role}</small></div>

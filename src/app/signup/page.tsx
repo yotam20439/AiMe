@@ -39,11 +39,11 @@ export default function SignupPage() {
     <div className="shell">
       <form className="panel" onSubmit={submit}>
         <h1>Create your account</h1>
-        <p className="lead">One household can hold a couple of people, each with their own login.</p>
+        <p className="lead">Set this up just for yourself, or share it with a partner or family member — either way works.</p>
         {error && <div className="error">{error}</div>}
         <div className="seg">
-          <button type="button" className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>Start a household</button>
-          <button type="button" className={mode === "join" ? "on" : ""} onClick={() => setMode("join")}>Join with a code</button>
+          <button type="button" className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>Create my account</button>
+          <button type="button" className={mode === "join" ? "on" : ""} onClick={() => setMode("join")}>Join someone else's</button>
         </div>
         <div className="field">
           <label>Your name</label>
@@ -59,12 +59,12 @@ export default function SignupPage() {
         </div>
         {mode === "create" ? (
           <div className="field">
-            <label>Household name (e.g. "The Cohens")</label>
-            <input className="input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder="Optional" />
+            <label>Name for this account (optional)</label>
+            <input className="input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder={`e.g. "${name || "Alex"}" or "The Cohens" — only needed if you'll invite someone`} />
           </div>
         ) : (
           <div className="field">
-            <label>Invite code from whoever set up your household</label>
+            <label>Invite code from whoever set this up</label>
             <input className="input" required value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} />
           </div>
         )}
