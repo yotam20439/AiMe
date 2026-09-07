@@ -1064,7 +1064,7 @@ export default function Dashboard() {
         <b>AiMe</b>
         <span style={{ color: "var(--text-2)", fontSize: 13 }}>{session?.user?.name}</span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/household">Household</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/household">Account</Link>
         <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>Sign out</button>
       </div>
       <div className="content">
@@ -1185,15 +1185,18 @@ export default function HouseholdPage() {
         <Link className="btn" style={{ width: "auto" }} href="/dashboard">Back to Today</Link>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Household</h1>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Account &amp; sharing</h1>
         {household && (
           <>
             <p style={{ color: "var(--text-2)" }}>
-              Share this code with a partner or family member. When they sign up and choose
-              "Join with a code," they'll land in the same household with their own login and
-              their own connected accounts.
+              {household.members.length > 1
+                ? "Everyone below shares this account, each with their own login and their own connected services."
+                : "It's just you here — nothing else to set up. If you ever want to share this with a partner or family member, send them this code:"}
             </p>
-            <div className="code-box" style={{ marginBottom: 20 }}>{household.inviteCode}</div>
+            <div className="code-box" style={{ marginBottom: 8 }}>{household.inviteCode}</div>
+            <p style={{ color: "var(--text-3)", fontSize: 12.5, marginTop: 0, marginBottom: 20 }}>
+              They'll sign up and choose "Join someone else's," using this code.
+            </p>
             {household.members.map((m) => (
               <div className="row" key={m.id}>
                 <div className="t"><b>{m.name}</b><small>{m.email} · {m.role}</small></div>
@@ -1339,10 +1342,10 @@ export default function OnboardingClient() {
       <p className="lead">Your digital life is full of information. AiMe turns it into action — bills, replies, appointments, the small things that fall through the cracks.</p>
       {household && (
         <div className="conn-row">
-          <span className="logo">🏠</span>
+          <span className="logo">🔗</span>
           <div className="grow">
-            <b>{household.name}</b>
-            <small>Invite code for a partner or family member: <code>{household.inviteCode}</code></small>
+            <b>Want to share this with someone?</b>
+            <small>They can join anytime with this code — no rush: <code>{household.inviteCode}</code></small>
           </div>
         </div>
       )}
@@ -1543,11 +1546,11 @@ export default function SignupPage() {
     <div className="shell">
       <form className="panel" onSubmit={submit}>
         <h1>Create your account</h1>
-        <p className="lead">One household can hold a couple of people, each with their own login.</p>
+        <p className="lead">Set this up just for yourself, or share it with a partner or family member — either way works.</p>
         {error && <div className="error">{error}</div>}
         <div className="seg">
-          <button type="button" className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>Start a household</button>
-          <button type="button" className={mode === "join" ? "on" : ""} onClick={() => setMode("join")}>Join with a code</button>
+          <button type="button" className={mode === "create" ? "on" : ""} onClick={() => setMode("create")}>Create my account</button>
+          <button type="button" className={mode === "join" ? "on" : ""} onClick={() => setMode("join")}>Join someone else's</button>
         </div>
         <div className="field">
           <label>Your name</label>
@@ -1563,12 +1566,12 @@ export default function SignupPage() {
         </div>
         {mode === "create" ? (
           <div className="field">
-            <label>Household name (e.g. "The Cohens")</label>
-            <input className="input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder="Optional" />
+            <label>Name for this account (optional)</label>
+            <input className="input" value={householdName} onChange={(e) => setHouseholdName(e.target.value)} placeholder={`e.g. "${name || "Alex"}" or "The Cohens" — only needed if you'll invite someone`} />
           </div>
         ) : (
           <div className="field">
-            <label>Invite code from whoever set up your household</label>
+            <label>Invite code from whoever set this up</label>
             <input className="input" required value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} />
           </div>
         )}
