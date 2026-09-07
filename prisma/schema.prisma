@@ -1,0 +1,111 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// A household is the "couple's account" — a small group who share visibility
+// into shared tasks. Each member still has their own login and their own
+// connected accounts; nothing about one person's Gmail is visible to another
+// unless a task is explicitly marked shared.
+model Household {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+
+  members User[]
+  tasks   Task[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  household    Household @relation(fields: [householdId], references: [id])
+  householdId  String
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("member") // "owner" | "member"
+  proactivity  String   @default("balanced") // "gentle" | "balanced" | "proactive"
+  createdAt    DateTime @default(now())
+
+  integrations   Integration[]
+  tasks          Task[]
+  activity       ActivityEvent[]
+  pendingLinks   PendingLink[]
+}
+
+// One row per connected service per person. Tokens are encrypted (see lib/crypto.ts)
+// before they're ever written here — the database holds ciphertext, never a raw token.
+model Integration {
+  id              String    @id @default(cuid())
+  user            User      @relation(fields: [userId], references: [id])
+  userId          String
+  provider        String    // "google" | "telegram" | "slack" | "notion"
+  status          String    @default("connected") // "connected" | "error" | "disconnected"
+  accountLabel    String?
+  externalId      String?   // e.g. Telegram chat id, Slack team id, Notion workspace id
+  accessTokenEnc  String?
+  refreshTokenEnc String?
+  scope           String?
+  expiresAt       DateTime?
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@unique([userId, provider])
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  household   Household @relation(fields: [householdId], references: [id])
+  householdId String
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+
+  title      String
+  type       String   @default("task") // bill | message | document | appointment | task
+  source     String   // gmail | telegram | slack | notion | manual
+  category   String   @default("personal")
+  priority   String   @default("normal") // urgent | high | normal | low
+  status     String   @default("open")   // open | waiting | completed | dismissed
+  visibility String   @default("private") // private | household
+
+  due       DateTime?
+  amount    Float?
+  currency  String?
+  aiSummary String?
+  why       String?
+
+  // De-dupe key: e.g. a Gmail message id or "telegram:<chatId>:<messageId>".
+  // Prevents the same email being turned into two tasks on the next sync.
+  sourceRef String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, sourceRef])
+}
+
+model ActivityEvent {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  text      String
+  kind      String   @default("tasks") // tasks | messages | documents | calendar | automations
+  createdAt DateTime @default(now())
+}
+
+// Short-lived codes used to link a Telegram chat (or similar) back to a signed-in user
+// during onboarding, without ever asking Telegram for a phone number or contact list.
+model PendingLink {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  provider  String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
