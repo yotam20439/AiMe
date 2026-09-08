@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import { google } from "googleapis";
 import { authOptions } from "@/lib/auth";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { encrypt } from "@/lib/crypto";
@@ -20,40 +21,49 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/onboarding?error=google", process.env.NEXTAUTH_URL));
   }
 
-  const oauth2Client = createGoogleOAuthClient();
-  const { tokens } = await oauth2Client.getToken(code);
+  try {
+    const oauth2Client = createGoogleOAuthClient();
+    const { tokens } = await oauth2Client.getToken(code);
 
-  oauth2Client.setCredentials(tokens);
-  const oauth2 = require("googleapis").google.oauth2({ version: "v2", auth: oauth2Client });
-  const info = await oauth2.userinfo.get().catch(() => null);
+    oauth2Client.setCredentials(tokens);
+    const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+    const info = await oauth2.userinfo.get().catch(() => null);
 
-  await prisma.integration.upsert({
-    where: { userId_provider: { userId, provider: "google" } },
-    create: {
-      userId,
-      provider: "google",
-      accountLabel: info?.data?.email ?? "Google account",
-      accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : null,
-      refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
-      scope: tokens.scope ?? null,
-      expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      status: "connected",
-    },
-    update: {
-      accountLabel: info?.data?.email ?? "Google account",
-      accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : undefined,
-      // Google only sends a refresh_token on the first consent, or when prompt=consent is forced
-      // (which /connect always does) — so it's safe to overwrite when present.
-      refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
-      scope: tokens.scope ?? null,
-      expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      status: "connected",
-    },
-  });
+    await prisma.integration.upsert({
+      where: { userId_provider: { userId, provider: "google" } },
+      create: {
+        userId,
+        provider: "google",
+        accountLabel: info?.data?.email ?? "Google account",
+        accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : null,
+        refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
+        scope: tokens.scope ?? null,
+        expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        status: "connected",
+      },
+      update: {
+        accountLabel: info?.data?.email ?? "Google account",
+        accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : undefined,
+        // Google only sends a refresh_token on the first consent, or when prompt=consent is forced
+        // (which /connect always does) — so it's safe to overwrite when present.
+        refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
+        scope: tokens.scope ?? null,
+        expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        status: "connected",
+      },
+    });
 
-  await prisma.activityEvent.create({
-    data: { userId, text: `Connected Gmail, Calendar and Drive (${info?.data?.email ?? "Google"}).`, kind: "automations" },
-  });
+    await prisma.activityEvent.create({
+      data: { userId, text: `Connected Gmail, Calendar and Drive (${info?.data?.email ?? "Google"}).`, kind: "automations" },
+    });
 
-  return NextResponse.redirect(new URL("/onboarding?connected=google", process.env.NEXTAUTH_URL));
+    return NextResponse.redirect(new URL("/onboarding?connected=google", process.env.NEXTAUTH_URL));
+  } catch (err: any) {
+    // Most likely cause: ENCRYPTION_KEY (or another required env var) isn't set on Vercel.
+    console.error("Google callback failed:", err);
+    const url = new URL("/onboarding", process.env.NEXTAUTH_URL);
+    url.searchParams.set("error", "google");
+    url.searchParams.set("detail", (err?.message || "unknown error").slice(0, 200));
+    return NextResponse.redirect(url);
+  }
 }

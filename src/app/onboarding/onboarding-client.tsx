@@ -13,6 +13,8 @@ export default function OnboardingClient() {
   const [household, setHousehold] = useState<{ name: string; inviteCode: string } | null>(null);
   const [level, setLevel] = useState<"gentle" | "balanced" | "proactive">("balanced");
 
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   async function refreshStatus() {
     const res = await fetch("/api/integrations/status");
     if (res.ok) setStatus(await res.json());
@@ -25,6 +27,9 @@ export default function OnboardingClient() {
     if (params.get("connected")) {
       refreshStatus();
       setStep((s) => Math.max(s, 1));
+    }
+    if (params.get("error")) {
+      setConnectError(params.get("detail") || `Connecting ${params.get("error")} failed. Check Vercel's Runtime Logs for details.`);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -173,6 +178,7 @@ export default function OnboardingClient() {
   return (
     <div className="shell">
       <div className="ob-card">
+        {connectError && <div className="error" style={{ marginBottom: 16 }}>{connectError}</div>}
         {steps[step]}
         <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
           {step > 0 && <button className="btn" onClick={() => setStep(step - 1)}>Back</button>}

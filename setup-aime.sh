@@ -3428,6 +3428,7 @@ mkdir -p "src/app/api/integrations/google/callback"
 cat > "src/app/api/integrations/google/callback/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import { google } from "googleapis";
 import { authOptions } from "@/lib/auth";
 import { createGoogleOAuthClient } from "@/lib/google";
 import { encrypt } from "@/lib/crypto";
@@ -3448,42 +3449,51 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/onboarding?error=google", process.env.NEXTAUTH_URL));
   }
 
-  const oauth2Client = createGoogleOAuthClient();
-  const { tokens } = await oauth2Client.getToken(code);
+  try {
+    const oauth2Client = createGoogleOAuthClient();
+    const { tokens } = await oauth2Client.getToken(code);
 
-  oauth2Client.setCredentials(tokens);
-  const oauth2 = require("googleapis").google.oauth2({ version: "v2", auth: oauth2Client });
-  const info = await oauth2.userinfo.get().catch(() => null);
+    oauth2Client.setCredentials(tokens);
+    const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+    const info = await oauth2.userinfo.get().catch(() => null);
 
-  await prisma.integration.upsert({
-    where: { userId_provider: { userId, provider: "google" } },
-    create: {
-      userId,
-      provider: "google",
-      accountLabel: info?.data?.email ?? "Google account",
-      accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : null,
-      refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
-      scope: tokens.scope ?? null,
-      expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      status: "connected",
-    },
-    update: {
-      accountLabel: info?.data?.email ?? "Google account",
-      accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : undefined,
-      // Google only sends a refresh_token on the first consent, or when prompt=consent is forced
-      // (which /connect always does) — so it's safe to overwrite when present.
-      refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
-      scope: tokens.scope ?? null,
-      expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-      status: "connected",
-    },
-  });
+    await prisma.integration.upsert({
+      where: { userId_provider: { userId, provider: "google" } },
+      create: {
+        userId,
+        provider: "google",
+        accountLabel: info?.data?.email ?? "Google account",
+        accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : null,
+        refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
+        scope: tokens.scope ?? null,
+        expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        status: "connected",
+      },
+      update: {
+        accountLabel: info?.data?.email ?? "Google account",
+        accessTokenEnc: tokens.access_token ? encrypt(tokens.access_token) : undefined,
+        // Google only sends a refresh_token on the first consent, or when prompt=consent is forced
+        // (which /connect always does) — so it's safe to overwrite when present.
+        refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
+        scope: tokens.scope ?? null,
+        expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        status: "connected",
+      },
+    });
 
-  await prisma.activityEvent.create({
-    data: { userId, text: `Connected Gmail, Calendar and Drive (${info?.data?.email ?? "Google"}).`, kind: "automations" },
-  });
+    await prisma.activityEvent.create({
+      data: { userId, text: `Connected Gmail, Calendar and Drive (${info?.data?.email ?? "Google"}).`, kind: "automations" },
+    });
 
-  return NextResponse.redirect(new URL("/onboarding?connected=google", process.env.NEXTAUTH_URL));
+    return NextResponse.redirect(new URL("/onboarding?connected=google", process.env.NEXTAUTH_URL));
+  } catch (err: any) {
+    // Most likely cause: ENCRYPTION_KEY (or another required env var) isn't set on Vercel.
+    console.error("Google callback failed:", err);
+    const url = new URL("/onboarding", process.env.NEXTAUTH_URL);
+    url.searchParams.set("error", "google");
+    url.searchParams.set("detail", (err?.message || "unknown error").slice(0, 200));
+    return NextResponse.redirect(url);
+  }
 }
 AIME_HEREDOC_EOF_9f2c
 
@@ -4359,24 +4369,32 @@ export default function ChatPage() {
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/app/connections"
-cat > "src/app/connections/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
+cat > "src/app/connections/connections-client.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 type Status = { integrations: { provider: string; status: string; accountLabel?: string }[] };
 
-export default function ConnectionsPage() {
+export default function ConnectionsClient() {
+  const params = useSearchParams();
   const [status, setStatus] = useState<Status>({ integrations: [] });
   const [telegram, setTelegram] = useState<{ code: string; deepLink: string | null } | null>(null);
   const [level, setLevel] = useState<"gentle" | "balanced" | "proactive" | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   async function refresh() {
     const res = await fetch("/api/integrations/status");
     if (res.ok) setStatus(await res.json());
   }
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    if (params.get("error")) {
+      setConnectError(params.get("detail") || `Connecting ${params.get("error")} failed. Check Vercel's Runtime Logs for details.`);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isConnected = (provider: string) =>
     status.integrations.some((i) => i.provider === provider && i.status === "connected");
@@ -4416,6 +4434,7 @@ export default function ConnectionsPage() {
         <p style={{ color: "var(--text-2)" }}>
           Connect or reconnect anything here, any time — this isn't just a one-time onboarding step.
         </p>
+        {connectError && <div className="error">{connectError}</div>}
 
         <div className="conn-row">
           <span className="logo">✉️</span>
@@ -4484,6 +4503,20 @@ export default function ConnectionsPage() {
         ))}
       </div>
     </div>
+  );
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/app/connections"
+cat > "src/app/connections/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
+import { Suspense } from "react";
+import ConnectionsClient from "./connections-client";
+
+export default function ConnectionsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ConnectionsClient />
+    </Suspense>
   );
 }
 AIME_HEREDOC_EOF_9f2c
@@ -5325,6 +5358,8 @@ export default function OnboardingClient() {
   const [household, setHousehold] = useState<{ name: string; inviteCode: string } | null>(null);
   const [level, setLevel] = useState<"gentle" | "balanced" | "proactive">("balanced");
 
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   async function refreshStatus() {
     const res = await fetch("/api/integrations/status");
     if (res.ok) setStatus(await res.json());
@@ -5337,6 +5372,9 @@ export default function OnboardingClient() {
     if (params.get("connected")) {
       refreshStatus();
       setStep((s) => Math.max(s, 1));
+    }
+    if (params.get("error")) {
+      setConnectError(params.get("detail") || `Connecting ${params.get("error")} failed. Check Vercel's Runtime Logs for details.`);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -5485,6 +5523,7 @@ export default function OnboardingClient() {
   return (
     <div className="shell">
       <div className="ob-card">
+        {connectError && <div className="error" style={{ marginBottom: 16 }}>{connectError}</div>}
         {steps[step]}
         <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
           {step > 0 && <button className="btn" onClick={() => setStep(step - 1)}>Back</button>}
