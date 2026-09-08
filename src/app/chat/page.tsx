@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Message = { id: string; role: "user" | "model"; content: string };
 
 export default function ChatPage() {
+  const { t } = useLang();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -57,19 +59,16 @@ export default function ChatPage() {
           disabled={sending}
           onClick={(e) => send(e as any, REFRESH_PROMPT)}
         >
-          🔄 Check now
+          🔄 {t("checkNow")}
         </button>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">Today</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           {messages.length === 0 && (
-            <p style={{ color: "var(--text-2)", fontSize: 13.5 }}>
-              Ask about your bills, what's on your calendar this week, or what AiMe has found recently — it can look
-              those up for real. It won't send anything or change a task's status from here.
-            </p>
+            <p style={{ color: "var(--text-2)", fontSize: 13.5 }}>{t("chatEmpty")}</p>
           )}
           {messages.map((m) => (
             <div
@@ -96,7 +95,7 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
-          {sending && <p style={{ color: "var(--text-2)", fontSize: 13 }}>Thinking…</p>}
+          {sending && <p style={{ color: "var(--text-2)", fontSize: 13 }}>{t("thinking")}</p>}
           {error && <div className="error">{error}</div>}
           <div ref={bottomRef} />
         </div>
@@ -106,11 +105,11 @@ export default function ChatPage() {
         <input
           className="input"
           style={{ flex: 1 }}
-          placeholder="Ask AiMe anything about your inbox, calendar, or tasks…"
+          placeholder={t("askPlaceholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
-        <button className="btn primary" style={{ width: "auto" }} disabled={sending}>Send</button>
+        <button className="btn primary" style={{ width: "auto" }} disabled={sending}>{t("send")}</button>
       </form>
     </div>
   );

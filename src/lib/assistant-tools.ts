@@ -50,6 +50,29 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
       },
     },
   },
+  {
+    name: "create_task",
+    description:
+      "Add something actionable you found (a bill, an appointment to confirm, a document to sign) to the person's " +
+      "Today list, the same way AiMe's automatic background check already does. Check search_tasks first so you " +
+      "don't create a duplicate of something already tracked. If this came from a specific Gmail message, pass its " +
+      "id as sourceRef so it lines up with the background sync and never gets created twice.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short task title." },
+        type: { type: "string", enum: ["bill", "message", "document", "appointment", "task"] },
+        category: { type: "string", enum: ["personal", "work", "finance", "appointments", "purchases"] },
+        priority: { type: "string", enum: ["urgent", "high", "normal", "low"] },
+        amount: { type: "string", description: "Amount as a plain number string, if this is a bill. Omit otherwise." },
+        currency: { type: "string", description: "e.g. ILS or USD. Omit if not a bill." },
+        dueDate: { type: "string", description: "ISO date (YYYY-MM-DD) if known. Omit otherwise." },
+        why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
+        sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
+      },
+      required: ["title"],
+    },
+  },
 ];
 
 export function makeToolExecutor(userId: string) {
@@ -92,7 +115,7 @@ export function makeToolExecutor(userId: string) {
             });
             const headers = full.data.payload?.headers ?? [];
             const get = (n: string) => headers.find((h) => h.name === n)?.value ?? "";
-            return { subject: get("Subject"), from: get("From"), date: get("Date"), snippet: full.data.snippet ?? "" };
+            return { id: m.id, subject: get("Subject"), from: get("From"), date: get("Date"), snippet: full.data.snippet ?? "" };
           })
         );
         return { count: messages.length, messages };
@@ -124,6 +147,48 @@ export function makeToolExecutor(userId: string) {
         return { count: activity.length, activity: activity.map((a) => ({ text: a.text, kind: a.kind, when: a.createdAt })) };
       }
 
+      case "create_task": {
+        const title = String(args.title || "").trim().slice(0, 200);
+        if (!title) return { error: "title is required" };
+
+        // Reuse the exact same sourceRef the background Gmail sync would use for this
+        // message, so whichever path (chat or cron) gets there first, the other skips
+        // it instead of creating a second task for the same email.
+        const sourceRef = args.sourceRef ? String(args.sourceRef) : `chat:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) return { error: "User not found" };
+
+        const dueRaw = args.dueDate ? new Date(String(args.dueDate)) : null;
+        const due = dueRaw && !isNaN(dueRaw.getTime()) ? dueRaw : null;
+
+        const task = await prisma.task.upsert({
+          where: { userId_sourceRef: { userId, sourceRef } },
+          create: {
+            userId,
+            householdId: user.householdId,
+            sourceRef,
+            source: "chat",
+            title,
+            type: (args.type as string) || "task",
+            category: (args.category as string) || "personal",
+            priority: (args.priority as string) || "normal",
+            amount: args.amount ? Number(args.amount) : null,
+            currency: args.currency ? String(args.currency) : null,
+            due,
+            why: args.why ? String(args.why) : null,
+            aiSummary: args.why ? String(args.why) : null,
+          },
+          update: {}, // already exists (created earlier by chat or by the background sync) — leave it alone
+        });
+
+        await prisma.activityEvent.create({
+          data: { userId, text: `Added "${title}" from a chat check.`, kind: "tasks" },
+        });
+
+        return { created: true, taskId: task.id, title: task.title };
+      }
+
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -131,13 +196,24 @@ export function makeToolExecutor(userId: string) {
 }
 
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
-You have read-only tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, and see recent
-automated activity. Use a tool whenever the answer depends on their actual data rather than general knowledge — don't guess.
+You have tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, see recent automated
+activity, and add a new task. Use a tool whenever the answer depends on their actual data rather than general knowledge —
+don't guess.
 
 Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
 a substitute for checking again right now.
 
-You cannot send emails, create events, pay bills, or change any task's status; if asked to do one of those, tell them to use
-the relevant button in the app instead of pretending to do it yourself. Reply in the same language the person writes to you
-in — if they write in Hebrew, respond in Hebrew. Keep replies short, warm, and direct.`;
+When you find something actionable in Gmail — a bill, an appointment to confirm, a document to sign, a deadline — call
+search_tasks first to make sure it isn't already tracked, then call create_task to add it, passing the Gmail message's id
+as sourceRef. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat
+needs no separate permission. Don't create a task just because something is already on the calendar — that's only for
+genuinely actionable findings, not for restating what's already scheduled.
+
+You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
+those, tell them to use the relevant button in the app instead of pretending to do it yourself.
+
+Reply in the same language the person writes to you in — if they write in Hebrew, respond in Hebrew. Separately, when you
+summarize or quote something from an email or message, keep that content in whatever language it was originally written
+in — don't translate a Hebrew email's subject or details into English (or vice versa) just because your own reply happens
+to be in a different language. Keep replies short, warm, and direct.`;

@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Household = { name: string; inviteCode: string; members: { id: string; name: string; email: string; role: string }[] };
 
 export default function HouseholdPage() {
+  const { t } = useLang();
   const [household, setHousehold] = useState<Household | null>(null);
 
   useEffect(() => {
@@ -16,11 +18,11 @@ export default function HouseholdPage() {
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">Back to Today</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("backToToday")}</Link>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Account &amp; sharing</h1>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("accountTitle")}</h1>
         {household && (
           <>
             <p style={{ color: "var(--text-2)" }}>

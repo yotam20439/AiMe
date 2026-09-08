@@ -2,11 +2,13 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Status = { integrations: { provider: string; status: string; accountLabel?: string }[] };
 
 export default function ConnectionsClient() {
   const params = useSearchParams();
+  const { t, lang, setLang } = useLang();
   const [status, setStatus] = useState<Status>({ integrations: [] });
   const [telegram, setTelegram] = useState<{ code: string; deepLink: string | null } | null>(null);
   const [level, setLevel] = useState<"gentle" | "balanced" | "proactive" | null>(null);
@@ -55,14 +57,20 @@ export default function ConnectionsClient() {
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">Today</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Connections</h1>
-        <p style={{ color: "var(--text-2)" }}>
-          Connect or reconnect anything here, any time — this isn't just a one-time onboarding step.
-        </p>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("connectionsTitle")}</h1>
+        <p style={{ color: "var(--text-2)" }}>{t("connectionsLead")}</p>
         {connectError && <div className="error">{connectError}</div>}
+
+        <div className="conn-row">
+          <div className="grow"><b>{t("language")}</b><small>English / עברית</small></div>
+          <div className="seg">
+            <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>English</button>
+            <button className={lang === "he" ? "on" : ""} onClick={() => setLang("he")}>עברית</button>
+          </div>
+        </div>
 
         <div className="conn-row">
           <span className="logo">✉️</span>
@@ -118,7 +126,7 @@ export default function ConnectionsClient() {
           <span className="pill">Unavailable</span>
         </div>
 
-        <h2 style={{ fontSize: 16, marginTop: 28 }}>How proactive should AiMe be?</h2>
+        <h2 style={{ fontSize: 16, marginTop: 28 }}>{t("proactivityTitle")}</h2>
         {([
           ["gentle", "Gentle", "Only notify me when something is important."],
           ["balanced", "Balanced", "Suggest actions and reminders."],

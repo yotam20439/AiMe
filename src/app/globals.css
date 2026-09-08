@@ -3,12 +3,21 @@
   --text:#23211F; --text-2:#6B6660; --text-3:#9A958E;
   --accent:#0E7C86; --accent-2:#0A616A; --accent-weak:#E2F0F1; --accent-line:#BEDFE1;
   --red:#B03A2C; --red-weak:#FBEAE6; --green:#2C7357; --green-weak:#E3F0E9;
-  --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --sans:'Alef',ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5}
 a{color:var(--accent)}
 button,input{font:inherit}
+
+/* RTL support: flipped automatically whenever <html dir="rtl"> is set by the language toggle. */
+html[dir="rtl"] body{text-align:right}
+html[dir="rtl"] .topbar,
+html[dir="rtl"] .conn-row,
+html[dir="rtl"] .row,
+html[dir="rtl"] .list-item,
+html[dir="rtl"] .setrow{flex-direction:row-reverse}
+html[dir="rtl"] .seg{flex-direction:row-reverse}
 .shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
 .panel{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
 .panel h1{font-size:22px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}

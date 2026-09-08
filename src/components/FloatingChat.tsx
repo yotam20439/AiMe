@@ -4,6 +4,7 @@ import { useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAssistantChat } from "@/lib/useAssistantChat";
+import { useLang } from "@/lib/i18n";
 
 const REFRESH_PROMPT =
   "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
@@ -11,6 +12,7 @@ const REFRESH_PROMPT =
 export default function FloatingChat() {
   const { status } = useSession();
   const pathname = usePathname();
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const { messages, sending, error, send } = useAssistantChat(open);
@@ -66,7 +68,7 @@ export default function FloatingChat() {
             >
               🔄
             </button>
-            <Link href="/chat" style={{ fontSize: 12, color: "var(--accent)" }}>Expand</Link>
+            <Link href="/chat" style={{ fontSize: 12, color: "var(--accent)" }}>{t("expand")}</Link>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
@@ -89,7 +91,7 @@ export default function FloatingChat() {
                 </div>
               </div>
             ))}
-            {sending && <p style={{ color: "var(--text-2)", fontSize: 12 }}>Thinking…</p>}
+            {sending && <p style={{ color: "var(--text-2)", fontSize: 12 }}>{t("thinking")}</p>}
             {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
             <div ref={bottomRef} />
           </div>
@@ -98,12 +100,12 @@ export default function FloatingChat() {
             <input
               className="input"
               style={{ flex: 1, height: 32, fontSize: 13 }}
-              placeholder="Ask AiMe…"
+              placeholder={t("askShort")}
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
             <button className="btn primary" style={{ width: "auto", height: 32, fontSize: 13, padding: "0 10px" }} disabled={sending}>
-              Send
+              {t("send")}
             </button>
           </form>
         </div>

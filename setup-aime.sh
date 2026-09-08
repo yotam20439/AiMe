@@ -4263,10 +4263,12 @@ cat > "src/app/chat/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Message = { id: string; role: "user" | "model"; content: string };
 
 export default function ChatPage() {
+  const { t } = useLang();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -4319,19 +4321,16 @@ export default function ChatPage() {
           disabled={sending}
           onClick={(e) => send(e as any, REFRESH_PROMPT)}
         >
-          🔄 Check now
+          🔄 {t("checkNow")}
         </button>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">Today</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           {messages.length === 0 && (
-            <p style={{ color: "var(--text-2)", fontSize: 13.5 }}>
-              Ask about your bills, what's on your calendar this week, or what AiMe has found recently — it can look
-              those up for real. It won't send anything or change a task's status from here.
-            </p>
+            <p style={{ color: "var(--text-2)", fontSize: 13.5 }}>{t("chatEmpty")}</p>
           )}
           {messages.map((m) => (
             <div
@@ -4358,7 +4357,7 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
-          {sending && <p style={{ color: "var(--text-2)", fontSize: 13 }}>Thinking…</p>}
+          {sending && <p style={{ color: "var(--text-2)", fontSize: 13 }}>{t("thinking")}</p>}
           {error && <div className="error">{error}</div>}
           <div ref={bottomRef} />
         </div>
@@ -4368,11 +4367,11 @@ export default function ChatPage() {
         <input
           className="input"
           style={{ flex: 1 }}
-          placeholder="Ask AiMe anything about your inbox, calendar, or tasks…"
+          placeholder={t("askPlaceholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
-        <button className="btn primary" style={{ width: "auto" }} disabled={sending}>Send</button>
+        <button className="btn primary" style={{ width: "auto" }} disabled={sending}>{t("send")}</button>
       </form>
     </div>
   );
@@ -4385,11 +4384,13 @@ cat > "src/app/connections/connections-client.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Status = { integrations: { provider: string; status: string; accountLabel?: string }[] };
 
 export default function ConnectionsClient() {
   const params = useSearchParams();
+  const { t, lang, setLang } = useLang();
   const [status, setStatus] = useState<Status>({ integrations: [] });
   const [telegram, setTelegram] = useState<{ code: string; deepLink: string | null } | null>(null);
   const [level, setLevel] = useState<"gentle" | "balanced" | "proactive" | null>(null);
@@ -4438,14 +4439,20 @@ export default function ConnectionsClient() {
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">Today</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Connections</h1>
-        <p style={{ color: "var(--text-2)" }}>
-          Connect or reconnect anything here, any time — this isn't just a one-time onboarding step.
-        </p>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("connectionsTitle")}</h1>
+        <p style={{ color: "var(--text-2)" }}>{t("connectionsLead")}</p>
         {connectError && <div className="error">{connectError}</div>}
+
+        <div className="conn-row">
+          <div className="grow"><b>{t("language")}</b><small>English / עברית</small></div>
+          <div className="seg">
+            <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>English</button>
+            <button className={lang === "he" ? "on" : ""} onClick={() => setLang("he")}>עברית</button>
+          </div>
+        </div>
 
         <div className="conn-row">
           <span className="logo">✉️</span>
@@ -4501,7 +4508,7 @@ export default function ConnectionsClient() {
           <span className="pill">Unavailable</span>
         </div>
 
-        <h2 style={{ fontSize: 16, marginTop: 28 }}>How proactive should AiMe be?</h2>
+        <h2 style={{ fontSize: 16, marginTop: 28 }}>{t("proactivityTitle")}</h2>
         {([
           ["gentle", "Gentle", "Only notify me when something is important."],
           ["balanced", "Balanced", "Suggest actions and reminders."],
@@ -4538,6 +4545,7 @@ cat > "src/app/dashboard/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Task = {
   id: string; title: string; type: string; source: string; priority: string; status: string;
@@ -4547,6 +4555,7 @@ type Task = {
 
 export default function Dashboard() {
   const { data: session } = useSession();
+  const { t } = useLang();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -4578,38 +4587,38 @@ export default function Dashboard() {
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <span style={{ color: "var(--text-2)", fontSize: 13 }}>{session?.user?.name}</span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/chat">Chat</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/household">Account</Link>
-        <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>Sign out</button>
+        <Link className="btn" style={{ width: "auto" }} href="/chat">{t("chat")}</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/household">{t("account")}</Link>
+        <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>{t("signOut")}</button>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Today</h1>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
         {loading ? (
-          <p style={{ color: "var(--text-2)" }}>Loading…</p>
+          <p style={{ color: "var(--text-2)" }}>{t("loading")}</p>
         ) : open.length === 0 ? (
           <p style={{ color: "var(--text-2)" }}>
             Nothing here yet. Connected accounts sync automatically every 15 minutes — or trigger the cron
             endpoint manually while testing.
           </p>
         ) : (
-          open.map((t) => (
-            <div className="row" key={t.id}>
+          open.map((t2) => (
+            <div className="row" key={t2.id}>
               <div className="t">
-                <b>{t.title}{t.amount ? ` · ${t.currency ?? ""}${t.amount}` : ""}</b>
-                <small>{t.aiSummary ?? `${t.source} · ${t.priority}`}{t.due ? ` · Due ${new Date(t.due).toLocaleDateString()}` : ""}</small>
+                <b>{t2.title}{t2.amount ? ` · ${t2.currency ?? ""}${t2.amount}` : ""}</b>
+                <small>{t2.aiSummary ?? `${t2.source} · ${t2.priority}`}{t2.due ? ` · Due ${new Date(t2.due).toLocaleDateString()}` : ""}</small>
               </div>
-              <button className="btn" style={{ width: "auto" }} onClick={() => complete(t.id)}>Complete</button>
+              <button className="btn" style={{ width: "auto" }} onClick={() => complete(t2.id)}>{t("complete")}</button>
             </div>
           ))
         )}
 
         {done.length > 0 && (
           <>
-            <h2 style={{ fontSize: 15, marginTop: 28, color: "var(--text-2)" }}>Completed</h2>
-            {done.map((t) => (
-              <div className="row" key={t.id} style={{ opacity: 0.6 }}>
-                <div className="t"><b style={{ textDecoration: "line-through" }}>{t.title}</b></div>
+            <h2 style={{ fontSize: 15, marginTop: 28, color: "var(--text-2)" }}>{t("completed")}</h2>
+            {done.map((t2) => (
+              <div className="row" key={t2.id} style={{ opacity: 0.6 }}>
+                <div className="t"><b style={{ textDecoration: "line-through" }}>{t2.title}</b></div>
               </div>
             ))}
           </>
@@ -5172,12 +5181,21 @@ cat > "src/app/globals.css" << 'AIME_HEREDOC_EOF_9f2c'
   --text:#23211F; --text-2:#6B6660; --text-3:#9A958E;
   --accent:#0E7C86; --accent-2:#0A616A; --accent-weak:#E2F0F1; --accent-line:#BEDFE1;
   --red:#B03A2C; --red-weak:#FBEAE6; --green:#2C7357; --green-weak:#E3F0E9;
-  --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --sans:'Alef',ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5}
 a{color:var(--accent)}
 button,input{font:inherit}
+
+/* RTL support: flipped automatically whenever <html dir="rtl"> is set by the language toggle. */
+html[dir="rtl"] body{text-align:right}
+html[dir="rtl"] .topbar,
+html[dir="rtl"] .conn-row,
+html[dir="rtl"] .row,
+html[dir="rtl"] .list-item,
+html[dir="rtl"] .setrow{flex-direction:row-reverse}
+html[dir="rtl"] .seg{flex-direction:row-reverse}
 .shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
 .panel{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px}
 .panel h1{font-size:22px;font-weight:600;letter-spacing:-.02em;margin:0 0 6px}
@@ -5231,10 +5249,12 @@ cat > "src/app/household/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useLang } from "@/lib/i18n";
 
 type Household = { name: string; inviteCode: string; members: { id: string; name: string; email: string; role: string }[] };
 
 export default function HouseholdPage() {
+  const { t } = useLang();
   const [household, setHousehold] = useState<Household | null>(null);
 
   useEffect(() => {
@@ -5246,11 +5266,11 @@ export default function HouseholdPage() {
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">Back to Today</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
+        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("backToToday")}</Link>
       </div>
       <div className="content">
-        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>Account &amp; sharing</h1>
+        <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("accountTitle")}</h1>
         {household && (
           <>
             <p style={{ color: "var(--text-2)" }}>
@@ -5292,6 +5312,11 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link href="https://fonts.googleapis.com/css2?family=Alef:wght@400;700&display=swap" rel="stylesheet" />
+      </head>
       <body>
         <Providers>
           {children}
@@ -5693,6 +5718,7 @@ import { useSession } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAssistantChat } from "@/lib/useAssistantChat";
+import { useLang } from "@/lib/i18n";
 
 const REFRESH_PROMPT =
   "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
@@ -5700,6 +5726,7 @@ const REFRESH_PROMPT =
 export default function FloatingChat() {
   const { status } = useSession();
   const pathname = usePathname();
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const { messages, sending, error, send } = useAssistantChat(open);
@@ -5755,7 +5782,7 @@ export default function FloatingChat() {
             >
               🔄
             </button>
-            <Link href="/chat" style={{ fontSize: 12, color: "var(--accent)" }}>Expand</Link>
+            <Link href="/chat" style={{ fontSize: 12, color: "var(--accent)" }}>{t("expand")}</Link>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
@@ -5778,7 +5805,7 @@ export default function FloatingChat() {
                 </div>
               </div>
             ))}
-            {sending && <p style={{ color: "var(--text-2)", fontSize: 12 }}>Thinking…</p>}
+            {sending && <p style={{ color: "var(--text-2)", fontSize: 12 }}>{t("thinking")}</p>}
             {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
             <div ref={bottomRef} />
           </div>
@@ -5787,12 +5814,12 @@ export default function FloatingChat() {
             <input
               className="input"
               style={{ flex: 1, height: 32, fontSize: 13 }}
-              placeholder="Ask AiMe…"
+              placeholder={t("askShort")}
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
             <button className="btn primary" style={{ width: "auto", height: 32, fontSize: 13, padding: "0 10px" }} disabled={sending}>
-              Send
+              {t("send")}
             </button>
           </form>
         </div>
@@ -5856,6 +5883,29 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
       },
     },
   },
+  {
+    name: "create_task",
+    description:
+      "Add something actionable you found (a bill, an appointment to confirm, a document to sign) to the person's " +
+      "Today list, the same way AiMe's automatic background check already does. Check search_tasks first so you " +
+      "don't create a duplicate of something already tracked. If this came from a specific Gmail message, pass its " +
+      "id as sourceRef so it lines up with the background sync and never gets created twice.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short task title." },
+        type: { type: "string", enum: ["bill", "message", "document", "appointment", "task"] },
+        category: { type: "string", enum: ["personal", "work", "finance", "appointments", "purchases"] },
+        priority: { type: "string", enum: ["urgent", "high", "normal", "low"] },
+        amount: { type: "string", description: "Amount as a plain number string, if this is a bill. Omit otherwise." },
+        currency: { type: "string", description: "e.g. ILS or USD. Omit if not a bill." },
+        dueDate: { type: "string", description: "ISO date (YYYY-MM-DD) if known. Omit otherwise." },
+        why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
+        sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
+      },
+      required: ["title"],
+    },
+  },
 ];
 
 export function makeToolExecutor(userId: string) {
@@ -5898,7 +5948,7 @@ export function makeToolExecutor(userId: string) {
             });
             const headers = full.data.payload?.headers ?? [];
             const get = (n: string) => headers.find((h) => h.name === n)?.value ?? "";
-            return { subject: get("Subject"), from: get("From"), date: get("Date"), snippet: full.data.snippet ?? "" };
+            return { id: m.id, subject: get("Subject"), from: get("From"), date: get("Date"), snippet: full.data.snippet ?? "" };
           })
         );
         return { count: messages.length, messages };
@@ -5930,6 +5980,48 @@ export function makeToolExecutor(userId: string) {
         return { count: activity.length, activity: activity.map((a) => ({ text: a.text, kind: a.kind, when: a.createdAt })) };
       }
 
+      case "create_task": {
+        const title = String(args.title || "").trim().slice(0, 200);
+        if (!title) return { error: "title is required" };
+
+        // Reuse the exact same sourceRef the background Gmail sync would use for this
+        // message, so whichever path (chat or cron) gets there first, the other skips
+        // it instead of creating a second task for the same email.
+        const sourceRef = args.sourceRef ? String(args.sourceRef) : `chat:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) return { error: "User not found" };
+
+        const dueRaw = args.dueDate ? new Date(String(args.dueDate)) : null;
+        const due = dueRaw && !isNaN(dueRaw.getTime()) ? dueRaw : null;
+
+        const task = await prisma.task.upsert({
+          where: { userId_sourceRef: { userId, sourceRef } },
+          create: {
+            userId,
+            householdId: user.householdId,
+            sourceRef,
+            source: "chat",
+            title,
+            type: (args.type as string) || "task",
+            category: (args.category as string) || "personal",
+            priority: (args.priority as string) || "normal",
+            amount: args.amount ? Number(args.amount) : null,
+            currency: args.currency ? String(args.currency) : null,
+            due,
+            why: args.why ? String(args.why) : null,
+            aiSummary: args.why ? String(args.why) : null,
+          },
+          update: {}, // already exists (created earlier by chat or by the background sync) — leave it alone
+        });
+
+        await prisma.activityEvent.create({
+          data: { userId, text: `Added "${title}" from a chat check.`, kind: "tasks" },
+        });
+
+        return { created: true, taskId: task.id, title: task.title };
+      }
+
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -5937,16 +6029,27 @@ export function makeToolExecutor(userId: string) {
 }
 
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
-You have read-only tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, and see recent
-automated activity. Use a tool whenever the answer depends on their actual data rather than general knowledge — don't guess.
+You have tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, see recent automated
+activity, and add a new task. Use a tool whenever the answer depends on their actual data rather than general knowledge —
+don't guess.
 
 Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
 a substitute for checking again right now.
 
-You cannot send emails, create events, pay bills, or change any task's status; if asked to do one of those, tell them to use
-the relevant button in the app instead of pretending to do it yourself. Reply in the same language the person writes to you
-in — if they write in Hebrew, respond in Hebrew. Keep replies short, warm, and direct.`;
+When you find something actionable in Gmail — a bill, an appointment to confirm, a document to sign, a deadline — call
+search_tasks first to make sure it isn't already tracked, then call create_task to add it, passing the Gmail message's id
+as sourceRef. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat
+needs no separate permission. Don't create a task just because something is already on the calendar — that's only for
+genuinely actionable findings, not for restating what's already scheduled.
+
+You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
+those, tell them to use the relevant button in the app instead of pretending to do it yourself.
+
+Reply in the same language the person writes to you in — if they write in Hebrew, respond in Hebrew. Separately, when you
+summarize or quote something from an email or message, keep that content in whatever language it was originally written
+in — don't translate a Hebrew email's subject or details into English (or vice versa) just because your own reply happens
+to be in a different language. Keep replies short, warm, and direct.`;
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/lib"
@@ -6325,6 +6428,78 @@ export function createGoogleOAuthClient() {
     process.env.GOOGLE_CLIENT_SECRET,
     getRedirectUri()
   );
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/lib"
+cat > "src/lib/i18n.ts" << 'AIME_HEREDOC_EOF_9f2c'
+"use client";
+import { useCallback, useEffect, useState } from "react";
+
+export type Lang = "en" | "he";
+
+// Keep this small and flat on purpose — it covers navigation and the screens people
+// look at daily (Today, Connections, Account, Chat). Longer copy (onboarding prose,
+// error messages) stays in English for now; extend this dictionary if that's needed.
+const DICT = {
+  today: { en: "Today", he: "היום" },
+  chat: { en: "Chat", he: "צ'אט" },
+  connections: { en: "Connections", he: "חיבורים" },
+  account: { en: "Account", he: "חשבון" },
+  backToToday: { en: "Back to Today", he: "חזרה להיום" },
+  signOut: { en: "Sign out", he: "התנתקות" },
+  checkNow: { en: "Check now", he: "בדוק עכשיו" },
+  expand: { en: "Expand", he: "הרחבה" },
+  send: { en: "Send", he: "שליחה" },
+  thinking: { en: "Thinking…", he: "חושב…" },
+  askPlaceholder: { en: "Ask AiMe anything about your inbox, calendar, or tasks…", he: "שאל את AiMe על המייל, היומן או המשימות שלך…" },
+  askShort: { en: "Ask AiMe…", he: "שאל את AiMe…" },
+  chatEmpty: {
+    en: "Ask about your bills, what's on your calendar this week, or what AiMe has found recently — it can look those up for real. It won't send anything or change a task's status from here.",
+    he: "שאל על החשבונות שלך, מה יש ביומן השבוע, או מה AiMe מצא לאחרונה — הוא באמת יבדוק את זה. הוא לא ישלח כלום ולא ישנה סטטוס של משימה מכאן.",
+  },
+  connectionsTitle: { en: "Connections", he: "חיבורים" },
+  connectionsLead: {
+    en: "Connect or reconnect anything here, any time — this isn't just a one-time onboarding step.",
+    he: "אפשר לחבר או לחבר מחדש כל דבר כאן, בכל זמן — זה לא רק שלב חד-פעמי בהרשמה.",
+  },
+  proactivityTitle: { en: "How proactive should AiMe be?", he: "כמה יזום AiMe צריך להיות?" },
+  accountTitle: { en: "Account & sharing", he: "חשבון ושיתוף" },
+  language: { en: "Interface language", he: "שפת הממשק" },
+  nothingHere: { en: "Nothing here yet.", he: "אין כאן כלום עדיין." },
+  loading: { en: "Loading…", he: "טוען…" },
+  complete: { en: "Complete", he: "בוצע" },
+  completed: { en: "Completed", he: "הושלם" },
+} satisfies Record<string, Record<Lang, string>>;
+
+export type DictKey = keyof typeof DICT;
+
+function applyDocumentLang(lang: Lang) {
+  if (typeof document === "undefined") return;
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "he" ? "rtl" : "ltr";
+}
+
+const STORAGE_KEY = "aime:lang";
+
+export function useLang() {
+  const [lang, setLangState] = useState<Lang>("en");
+
+  useEffect(() => {
+    const saved = (typeof window !== "undefined" && (localStorage.getItem(STORAGE_KEY) as Lang)) || "en";
+    setLangState(saved);
+    applyDocumentLang(saved);
+  }, []);
+
+  const setLang = useCallback((l: Lang) => {
+    localStorage.setItem(STORAGE_KEY, l);
+    setLangState(l);
+    applyDocumentLang(l);
+  }, []);
+
+  const t = useCallback((key: DictKey) => DICT[key]?.[lang] ?? String(key), [lang]);
+
+  return { lang, setLang, t };
 }
 AIME_HEREDOC_EOF_9f2c
 
