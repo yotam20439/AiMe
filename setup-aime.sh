@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+bash setup-aime.sh#!/usr/bin/env bash
 set -e
 echo "Creating AiMe project files..."
 
@@ -4281,9 +4281,9 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
-  async function send(e: React.FormEvent) {
+  async function send(e: React.FormEvent, overrideText?: string) {
     e.preventDefault();
-    const text = input.trim();
+    const text = (overrideText ?? input).trim();
     if (!text || sending) return;
     setInput("");
     setError("");
@@ -4305,11 +4305,22 @@ export default function ChatPage() {
     }
   }
 
+  const REFRESH_PROMPT =
+    "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
+        <button
+          className="btn"
+          style={{ width: "auto" }}
+          disabled={sending}
+          onClick={(e) => send(e as any, REFRESH_PROMPT)}
+        >
+          🔄 Check now
+        </button>
         <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
         <Link className="btn" style={{ width: "auto" }} href="/dashboard">Today</Link>
       </div>
@@ -5807,6 +5818,11 @@ export function makeToolExecutor(userId: string) {
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
 You have read-only tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, and see recent
 automated activity. Use a tool whenever the answer depends on their actual data rather than general knowledge — don't guess.
+
+Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
+in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
+a substitute for checking again right now.
+
 You cannot send emails, create events, pay bills, or change any task's status; if asked to do one of those, tell them to use
 the relevant button in the app instead of pretending to do it yourself. Reply in the same language the person writes to you
 in — if they write in Hebrew, respond in Hebrew. Keep replies short, warm, and direct.`;

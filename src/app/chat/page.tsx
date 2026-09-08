@@ -19,9 +19,9 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
-  async function send(e: React.FormEvent) {
+  async function send(e: React.FormEvent, overrideText?: string) {
     e.preventDefault();
-    const text = input.trim();
+    const text = (overrideText ?? input).trim();
     if (!text || sending) return;
     setInput("");
     setError("");
@@ -43,11 +43,22 @@ export default function ChatPage() {
     }
   }
 
+  const REFRESH_PROMPT =
+    "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
+        <button
+          className="btn"
+          style={{ width: "auto" }}
+          disabled={sending}
+          onClick={(e) => send(e as any, REFRESH_PROMPT)}
+        >
+          🔄 Check now
+        </button>
         <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
         <Link className="btn" style={{ width: "auto" }} href="/dashboard">Today</Link>
       </div>
