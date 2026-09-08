@@ -1,4 +1,4 @@
-npx prisma migrate dev --name add_chat#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -e
 echo "Creating AiMe project files..."
 
@@ -57,7 +57,7 @@ ANTHROPIC_API_KEY=""
 # This powers the /chat page, separate from the Anthropic key above which only does the
 # quiet background bill/appointment extraction.
 GEMINI_API_KEY=""
-GEMINI_MODEL="gemini-2.5-flash"
+GEMINI_MODEL="gemini-3.6-flash"
 AIME_HEREDOC_EOF_9f2c
 
 cat > ".gitignore" << 'AIME_HEREDOC_EOF_9f2c'
@@ -213,7 +213,7 @@ cat > "package.json" << 'AIME_HEREDOC_EOF_9f2c'
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "next": "14.2.5",
+    "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "next-auth": "^4.24.7",
@@ -5970,7 +5970,7 @@ export type ToolDeclaration = {
   };
 };
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
 async function callGemini(contents: GeminiContent[], tools: ToolDeclaration[], systemText: string) {
   const apiKey = process.env.GEMINI_API_KEY;

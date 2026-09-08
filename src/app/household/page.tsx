@@ -16,6 +16,7 @@ export default function HouseholdPage() {
       <div className="topbar">
         <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
+        <Link className="btn" style={{ width: "auto" }} href="/connections">Connections</Link>
         <Link className="btn" style={{ width: "auto" }} href="/dashboard">Back to Today</Link>
       </div>
       <div className="content">

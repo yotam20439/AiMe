@@ -27,25 +27,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
 
-  await prisma.chatMessage.create({ data: { userId, role: "user", content: message } });
-
-  // Recent history gives Gemini context without resending the whole conversation forever.
-  const recent = await prisma.chatMessage.findMany({
-    where: { userId }, orderBy: { createdAt: "desc" }, take: 20,
-  });
-  const history: GeminiContent[] = recent.reverse().map((m) => ({
-    role: m.role === "user" ? "user" : "model",
-    parts: [{ text: m.content }],
-  }));
-
-  let reply: string;
   try {
-    const result = await chatWithTools(history, ASSISTANT_TOOLS, makeToolExecutor(userId), ASSISTANT_SYSTEM_PROMPT);
-    reply = result.reply;
-  } catch (err: any) {
-    reply = `Something went wrong talking to Gemini: ${err?.message || "unknown error"}`;
-  }
+    await prisma.chatMessage.create({ data: { userId, role: "user", content: message } });
 
-  await prisma.chatMessage.create({ data: { userId, role: "model", content: reply } });
-  return NextResponse.json({ reply });
+    // Recent history gives Gemini context without resending the whole conversation forever.
+    const recent = await prisma.chatMessage.findMany({
+      where: { userId }, orderBy: { createdAt: "desc" }, take: 20,
+    });
+    const history: GeminiContent[] = recent.reverse().map((m) => ({
+      role: m.role === "user" ? "user" : "model",
+      parts: [{ text: m.content }],
+    }));
+
+    let reply: string;
+    try {
+      const result = await chatWithTools(history, ASSISTANT_TOOLS, makeToolExecutor(userId), ASSISTANT_SYSTEM_PROMPT);
+      reply = result.reply;
+    } catch (err: any) {
+      reply = `Something went wrong talking to Gemini: ${err?.message || "unknown error"}`;
+    }
+
+    await prisma.chatMessage.create({ data: { userId, role: "model", content: reply } });
+    return NextResponse.json({ reply });
+  } catch (err: any) {
+    // Most likely cause: the chat_message table doesn't exist yet because the
+    // "add_chat" migration hasn't been run against this database.
+    console.error("Chat route failed:", err);
+    return NextResponse.json(
+      { error: `Chat storage failed: ${err?.message || "unknown database error"}. Have you run 'npx prisma migrate dev --name add_chat'?` },
+      { status: 500 }
+    );
+  }
 }

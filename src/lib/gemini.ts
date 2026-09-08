@@ -23,7 +23,7 @@ export type ToolDeclaration = {
   };
 };
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
 async function callGemini(contents: GeminiContent[], tools: ToolDeclaration[], systemText: string) {
   const apiKey = process.env.GEMINI_API_KEY;
