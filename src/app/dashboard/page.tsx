@@ -39,9 +39,10 @@ export default function Dashboard() {
   return (
     <div>
       <div className="topbar">
-        <b>AiMe</b>
+        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <span style={{ color: "var(--text-2)", fontSize: 13 }}>{session?.user?.name}</span>
         <div style={{ flex: 1 }} />
+        <Link className="btn" style={{ width: "auto" }} href="/chat">Chat</Link>
         <Link className="btn" style={{ width: "auto" }} href="/household">Account</Link>
         <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>Sign out</button>
       </div>

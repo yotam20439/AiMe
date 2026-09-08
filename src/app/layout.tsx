@@ -1,7 +1,13 @@
 import "./globals.css";
 import { Providers } from "./providers";
 
-export const metadata = { title: "AiMe" };
+export const metadata = {
+  title: "AiMe",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-icon.png",
+  },
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -47,6 +47,9 @@ button,input{font:inherit}
 
 .topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--border);background:var(--surface)}
 .topbar b{font-size:15px}
+.brand{display:inline-flex;align-items:center;gap:8px}
+.brand img{height:22px;width:auto;display:block}
+.brand-hero{height:34px;width:auto;display:block;margin-bottom:14px}
 .content{max-width:860px;margin:0 auto;padding:28px 20px 60px}
 .row{display:flex;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);margin-bottom:8px}
 .row .t{flex:1;min-width:0}

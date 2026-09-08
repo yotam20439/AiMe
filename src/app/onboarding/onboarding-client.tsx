@@ -59,6 +59,7 @@ export default function OnboardingClient() {
   const steps = [
     // Step 0 — welcome
     <div key="welcome">
+      <img src="/logo-mark.png" alt="" className="brand-hero" style={{ height: 44 }} />
       <h1>Meet AiMe</h1>
       <p className="lead">Your digital life is full of information. AiMe turns it into action — bills, replies, appointments, the small things that fall through the cracks.</p>
       {household && (

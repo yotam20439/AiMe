@@ -15,6 +15,9 @@ sync that turns Gmail into tasks.
   webhook ingestion, tasks created from messages
 - A cron job (`/api/cron/sync`) that polls connected Gmail accounts every 15 minutes,
   runs each candidate message through Claude for extraction, and creates tasks
+- A `/chat` page backed by Gemini, with read-only tools to search your tasks, Gmail,
+  and Calendar, and to see recent activity — it looks things up for real, but never
+  sends, pays, or changes anything (see `lib/assistant-tools.ts`)
 - Onboarding that chains all of the above into one flow
 
 **Connected, but ingestion logic is a stub:**
@@ -88,7 +91,20 @@ Get a key at [console.anthropic.com](https://console.anthropic.com). The extract
 step uses Haiku by default (`src/lib/extract.ts`) since it runs once per candidate
 message — cheap and fast is the right trade-off there.
 
-### 8. Deploy
+### 8. Gemini (for the /chat page)
+Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — no
+Google Cloud project or OAuth consent screen needed, just an API key. Put it in
+`GEMINI_API_KEY`. This is separate from the Google OAuth client in step 3: that one
+lets AiMe *read* Gmail/Calendar on your behalf; this key is what lets the chat
+assistant *reason* over what it finds there.
+
+Since this feature adds a new database table, run one more migration after pulling
+in this change:
+```
+npx prisma migrate dev --name add_chat
+```
+
+### 9. Deploy
 Push to a GitHub repo, import it in Vercel, paste in the same env vars (with
 `NEXTAUTH_URL` set to your real Vercel URL), and deploy. `vercel.json` registers the
 15-minute sync cron automatically.

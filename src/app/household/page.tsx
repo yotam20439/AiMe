@@ -14,7 +14,7 @@ export default function HouseholdPage() {
   return (
     <div>
       <div className="topbar">
-        <b>AiMe</b>
+        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
         <div style={{ flex: 1 }} />
         <Link className="btn" style={{ width: "auto" }} href="/dashboard">Back to Today</Link>
       </div>

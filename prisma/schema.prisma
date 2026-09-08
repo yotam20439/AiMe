@@ -36,6 +36,7 @@ model User {
   tasks          Task[]
   activity       ActivityEvent[]
   pendingLinks   PendingLink[]
+  chatMessages   ChatMessage[]
 }
 
 // One row per connected service per person. Tokens are encrypted (see lib/crypto.ts)
@@ -108,4 +109,16 @@ model PendingLink {
   provider  String
   createdAt DateTime @default(now())
   expiresAt DateTime
+}
+
+// One row per message in the "chat with your assistant" feature. The assistant
+// (Gemini) only ever reads through tool calls defined in lib/assistant-tools.ts —
+// it never writes, sends, or pays anything from a chat turn.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  role      String   // "user" | "model"
+  content   String
+  createdAt DateTime @default(now())
 }

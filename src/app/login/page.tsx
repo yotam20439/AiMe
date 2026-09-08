@@ -15,15 +15,21 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const res = await signIn("credentials", { email, password, redirect: false });
-    setLoading(false);
-    if (res?.error) setError("That email and password don't match.");
-    else router.push("/dashboard");
+    try {
+      const res = await signIn("credentials", { email, password, redirect: false });
+      if (res?.error) setError("That email and password don't match.");
+      else router.push("/dashboard");
+    } catch {
+      setError("Couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div className="shell">
       <form className="panel" onSubmit={submit}>
+        <img src="/logo-full.png" alt="AiMe" className="brand-hero" />
         <h1>Welcome back</h1>
         <p className="lead">Sign in to your AiMe account.</p>
         {error && <div className="error">{error}</div>}

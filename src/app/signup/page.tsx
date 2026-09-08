@@ -19,25 +19,39 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const res = await fetch("/api/signup", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode, name, email, password, householdName, inviteCode }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
+    try {
+      const res = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode, name, email, password, householdName, inviteCode }),
+      });
+
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // Server returned something that wasn't JSON (e.g. a crash page) — treat as a generic failure.
+        throw new Error(`Server returned an unexpected response (status ${res.status}).`);
+      }
+
+      if (!res.ok) {
+        setError(data.error || `Something went wrong (status ${res.status}).`);
+        return;
+      }
+
+      await signIn("credentials", { email, password, redirect: false });
+      router.push("/onboarding");
+    } catch (err: any) {
+      setError(err?.message || "Couldn't reach the server. Check your connection and try again.");
+    } finally {
       setLoading(false);
-      setError(data.error || "Something went wrong.");
-      return;
     }
-    await signIn("credentials", { email, password, redirect: false });
-    setLoading(false);
-    router.push("/onboarding");
   }
 
   return (
     <div className="shell">
       <form className="panel" onSubmit={submit}>
+        <img src="/logo-full.png" alt="AiMe" className="brand-hero" />
         <h1>Create your account</h1>
         <p className="lead">Set this up just for yourself, or share it with a partner or family member — either way works.</p>
         {error && <div className="error">{error}</div>}
