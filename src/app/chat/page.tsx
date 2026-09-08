@@ -46,7 +46,9 @@ export default function ChatPage() {
   }
 
   const REFRESH_PROMPT =
-    "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
+    "Check my Gmail and Calendar right now for anything relevant — bills, invoices, deadlines, invitations, " +
+    "appointments to confirm, and anything else worth tracking. Search thoroughly with several specific terms, not " +
+    "just one broad search, and add anything actionable you find as a task. Then summarize what you found and what you added.";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>

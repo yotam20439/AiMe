@@ -42,7 +42,8 @@ export async function getCalendarClient(integration: Integration) {
 // every newsletter in the inbox.
 const CANDIDATE_QUERY =
   'newer_than:2d (bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
-  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון") -category:promotions';
+  'invite OR invitation OR RSVP OR reminder OR ' +
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה) -category:promotions';
 
 export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
   const list = await gmail.users.messages.list({

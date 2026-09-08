@@ -1,9 +1,11 @@
 import type { ExtractedTask } from "./types";
 
 const SYSTEM_PROMPT = `You classify a single incoming message (an email or a chat message) for a personal
-assistant app called AiMe. Decide whether it contains something the user needs to act on:
-a bill, an appointment to confirm, a document to sign, a reminder request, or a direct
-question waiting for a reply. Newsletters, marketing, and messages with no action are not actionable.
+assistant app called AiMe. Decide whether it contains something the user needs to act on or should have organized:
+a bill, an appointment to confirm, a document to sign, an invitation or RSVP with a deadline, a reminder request, a
+deadline of any kind, or a direct question waiting for a reply. Pure marketing/promotional email and routine
+notification digests with nothing to act on (e.g. "you have 5 new messages") are not actionable — but lean toward
+organizing anything that looks personally relevant rather than skipping it.
 
 Respond with ONLY a JSON object, no prose, no markdown fences, matching exactly this shape:
 {"isActionable": boolean, "title": string, "type": "bill"|"message"|"document"|"appointment"|"task",

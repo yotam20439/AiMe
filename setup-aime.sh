@@ -4308,7 +4308,9 @@ export default function ChatPage() {
   }
 
   const REFRESH_PROMPT =
-    "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
+    "Check my Gmail and Calendar right now for anything relevant — bills, invoices, deadlines, invitations, " +
+    "appointments to confirm, and anything else worth tracking. Search thoroughly with several specific terms, not " +
+    "just one broad search, and add anything actionable you find as a task. Then summarize what you found and what you added.";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
@@ -5721,7 +5723,9 @@ import { useAssistantChat } from "@/lib/useAssistantChat";
 import { useLang } from "@/lib/i18n";
 
 const REFRESH_PROMPT =
-  "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
+  "Check my Gmail and Calendar right now for anything relevant — bills, invoices, deadlines, invitations, appointments " +
+  "to confirm, and anything else worth tracking. Search thoroughly with several specific terms, not just one broad " +
+  "search, and add anything actionable you find as a task. Then summarize what you found and what you added.";
 
 export default function FloatingChat() {
   const { status } = useSession();
@@ -6037,11 +6041,23 @@ Always call the relevant tool fresh for the current question, even if you or the
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
 a substitute for checking again right now.
 
-When you find something actionable in Gmail — a bill, an appointment to confirm, a document to sign, a deadline — call
-search_tasks first to make sure it isn't already tracked, then call create_task to add it, passing the Gmail message's id
-as sourceRef. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat
-needs no separate permission. Don't create a task just because something is already on the calendar — that's only for
-genuinely actionable findings, not for restating what's already scheduled.
+Your job is to help keep their whole life organized, not just bills. That includes: bills and invoices, appointments to
+confirm, documents to sign, invitations or RSVPs with a deadline, reminders they or someone else mentioned, deadlines of
+any kind, and birthdays coming up in the next day or two (as a small reminder task, e.g. "Wish X a happy birthday").
+The only things that should NOT become tasks are pure marketing/promotional email and routine notifications with nothing
+to act on (e.g. a generic "5 new LinkedIn messages" digest). When in doubt about something that looks personally relevant,
+lean toward organizing it rather than skipping it.
+
+When asked to check email for anything relevant (bills, invoices, deadlines, invitations), don't rely on a single vague
+search. Gmail search only matches literal words, so run a few searches with concrete terms rather than one broad query —
+for example separate searches for: bill/invoice/payment terms (also try חשבונית, חשבון, תשלום, לתשלום since the inbox may
+be in Hebrew), appointment/confirmation terms (also תור, אישור), and invitation/RSVP terms (also הזמנה). A person saying
+"I have bills in my inbox" and not seeing them means the search missed them, not that they don't exist — search harder
+with more specific and varied terms before concluding there's nothing there.
+
+Call search_tasks first to make sure something isn't already tracked, then call create_task to add it, passing the Gmail
+message's id as sourceRef when you have one. This mirrors what AiMe's automatic background check already does on its own
+schedule, so doing it from chat needs no separate permission.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.
@@ -6167,9 +6183,11 @@ cat > "src/lib/extract.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import type { ExtractedTask } from "./types";
 
 const SYSTEM_PROMPT = `You classify a single incoming message (an email or a chat message) for a personal
-assistant app called AiMe. Decide whether it contains something the user needs to act on:
-a bill, an appointment to confirm, a document to sign, a reminder request, or a direct
-question waiting for a reply. Newsletters, marketing, and messages with no action are not actionable.
+assistant app called AiMe. Decide whether it contains something the user needs to act on or should have organized:
+a bill, an appointment to confirm, a document to sign, an invitation or RSVP with a deadline, a reminder request, a
+deadline of any kind, or a direct question waiting for a reply. Pure marketing/promotional email and routine
+notification digests with nothing to act on (e.g. "you have 5 new messages") are not actionable — but lean toward
+organizing anything that looks personally relevant rather than skipping it.
 
 Respond with ONLY a JSON object, no prose, no markdown fences, matching exactly this shape:
 {"isActionable": boolean, "title": string, "type": "bill"|"message"|"document"|"appointment"|"task",
@@ -6371,7 +6389,8 @@ export async function getCalendarClient(integration: Integration) {
 // every newsletter in the inbox.
 const CANDIDATE_QUERY =
   'newer_than:2d (bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
-  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון") -category:promotions';
+  'invite OR invitation OR RSVP OR reminder OR ' +
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה) -category:promotions';
 
 export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
   const list = await gmail.users.messages.list({
