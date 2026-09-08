@@ -11,7 +11,7 @@ export type GeminiPart =
   | { functionCall: { name: string; args: Record<string, unknown> } }
   | { functionResponse: { name: string; response: Record<string, unknown> } };
 
-export type GeminiContent = { role: "user" | "model" | "function"; parts: GeminiPart[] };
+export type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
 
 export type ToolDeclaration = {
   name: string;
@@ -88,7 +88,7 @@ export async function chatWithTools(
     }
 
     contents.push({ role: "model", parts: [{ functionCall: { name, args: args || {} } }] });
-    contents.push({ role: "function", parts: [{ functionResponse: { name, response: result } }] });
+    contents.push({ role: "user", parts: [{ functionResponse: { name, response: result } }] });
   }
 
   return { reply: "That took more steps than I could finish in one go — try narrowing the question.", toolCalls };

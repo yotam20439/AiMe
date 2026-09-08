@@ -1,4 +1,4 @@
-bash setup-aime.sh#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -e
 echo "Creating AiMe project files..."
 
@@ -5279,6 +5279,7 @@ mkdir -p "src/app"
 cat > "src/app/layout.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 import "./globals.css";
 import { Providers } from "./providers";
+import FloatingChat from "@/components/FloatingChat";
 
 export const metadata = {
   title: "AiMe",
@@ -5292,7 +5293,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <FloatingChat />
+        </Providers>
       </body>
     </html>
   );
@@ -5681,6 +5685,123 @@ export default function SignupPage() {
 }
 AIME_HEREDOC_EOF_9f2c
 
+mkdir -p "src/components"
+cat > "src/components/FloatingChat.tsx" << 'AIME_HEREDOC_EOF_9f2c'
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
+import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { useAssistantChat } from "@/lib/useAssistantChat";
+
+const REFRESH_PROMPT =
+  "Check my Gmail and Calendar right now for anything new or upcoming, and summarize what you find.";
+
+export default function FloatingChat() {
+  const { status } = useSession();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const { messages, sending, error, send } = useAssistantChat(open);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, sending, open]);
+
+  // Don't render pre-login, and don't double up with the full /chat page.
+  if (status !== "authenticated" || pathname === "/chat") return null;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!input.trim()) return;
+    send(input);
+    setInput("");
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label={open ? "Close AiMe chat" : "Open AiMe chat"}
+        style={{
+          position: "fixed", bottom: 20, right: 20, width: 52, height: 52, borderRadius: "50%",
+          background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer",
+          boxShadow: "0 8px 24px rgba(0,0,0,.25)", zIndex: 200, display: "grid", placeItems: "center",
+          fontSize: 22, lineHeight: 1,
+        }}
+      >
+        {open ? "×" : "💬"}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "fixed", bottom: 84, right: 20, width: 340, maxWidth: "calc(100vw - 24px)",
+            height: 460, maxHeight: "calc(100vh - 120px)", background: "var(--surface)",
+            border: "1px solid var(--border)", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.28)",
+            zIndex: 199, display: "flex", flexDirection: "column", overflow: "hidden",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
+            <img src="/logo-mark.png" alt="" style={{ width: 20, height: 20 }} />
+            <b style={{ fontSize: 13.5 }}>AiMe</b>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => send(REFRESH_PROMPT)}
+              disabled={sending}
+              title="Check email & calendar now"
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, padding: 4 }}
+            >
+              🔄
+            </button>
+            <Link href="/chat" style={{ fontSize: 12, color: "var(--accent)" }}>Expand</Link>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
+            {messages.length === 0 && (
+              <p style={{ color: "var(--text-2)", fontSize: 12.5, margin: 0 }}>
+                Ask about bills, your calendar, or recent activity.
+              </p>
+            )}
+            {messages.map((m) => (
+              <div key={m.id} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                <div
+                  style={{
+                    maxWidth: "85%", padding: "7px 10px", borderRadius: 10, fontSize: 13, whiteSpace: "pre-wrap",
+                    background: m.role === "user" ? "var(--accent)" : "var(--surface-2)",
+                    color: m.role === "user" ? "#fff" : "var(--text)",
+                    border: m.role === "user" ? "none" : "1px solid var(--border)",
+                  }}
+                >
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {sending && <p style={{ color: "var(--text-2)", fontSize: 12 }}>Thinking…</p>}
+            {error && <div className="error" style={{ fontSize: 12 }}>{error}</div>}
+            <div ref={bottomRef} />
+          </div>
+
+          <form onSubmit={submit} style={{ display: "flex", gap: 6, padding: 10, borderTop: "1px solid var(--border)" }}>
+            <input
+              className="input"
+              style={{ flex: 1, height: 32, fontSize: 13 }}
+              placeholder="Ask AiMe…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+            />
+            <button className="btn primary" style={{ width: "auto", height: 32, fontSize: 13, padding: "0 10px" }} disabled={sending}>
+              Send
+            </button>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+AIME_HEREDOC_EOF_9f2c
+
 mkdir -p "src/lib"
 cat > "src/lib/assistant-tools.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { prisma } from "./db";
@@ -6017,7 +6138,7 @@ export type GeminiPart =
   | { functionCall: { name: string; args: Record<string, unknown> } }
   | { functionResponse: { name: string; response: Record<string, unknown> } };
 
-export type GeminiContent = { role: "user" | "model" | "function"; parts: GeminiPart[] };
+export type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
 
 export type ToolDeclaration = {
   name: string;
@@ -6094,7 +6215,7 @@ export async function chatWithTools(
     }
 
     contents.push({ role: "model", parts: [{ functionCall: { name, args: args || {} } }] });
-    contents.push({ role: "function", parts: [{ functionResponse: { name, response: result } }] });
+    contents.push({ role: "user", parts: [{ functionResponse: { name, response: result } }] });
   }
 
   return { reply: "That took more steps than I could finish in one go — try narrowing the question.", toolCalls };
@@ -6233,6 +6354,53 @@ export type ExtractedTask = {
   dueDate?: string; // ISO date, if present
   whySummary?: string; // one sentence, shown to the user as "why AiMe created this"
 };
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/lib"
+cat > "src/lib/useAssistantChat.ts" << 'AIME_HEREDOC_EOF_9f2c'
+"use client";
+import { useEffect, useState } from "react";
+
+export type ChatMessage = { id: string; role: "user" | "model"; content: string };
+
+export function useAssistantChat(shouldLoad: boolean) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!shouldLoad || loaded) return;
+    fetch("/api/chat")
+      .then((r) => r.json())
+      .then((d) => setMessages(d.messages ?? []))
+      .finally(() => setLoaded(true));
+  }, [shouldLoad, loaded]);
+
+  async function send(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setError("");
+    setMessages((m) => [...m, { id: "temp-" + Date.now(), role: "user", content: trimmed }]);
+    setSending(true);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: trimmed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Status ${res.status}`);
+      setMessages((m) => [...m, { id: "reply-" + Date.now(), role: "model", content: data.reply }]);
+    } catch (err: any) {
+      setError(err?.message || "Couldn't reach the assistant.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return { messages, sending, error, send };
+}
 AIME_HEREDOC_EOF_9f2c
 
 cat > "tsconfig.json" << 'AIME_HEREDOC_EOF_9f2c'
