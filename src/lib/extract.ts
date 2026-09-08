@@ -13,7 +13,10 @@ Respond with ONLY a JSON object, no prose, no markdown fences, matching exactly 
 
 "whySummary" is one short sentence explaining, in plain language, what in the message caused you to
 create this task (e.g. "Contains an amount, a due date, and a payment link."). If isActionable is
-false, still return valid JSON with isActionable:false and the other fields as null/empty.`;
+false, still return valid JSON with isActionable:false and the other fields as null/empty.
+
+Write "title" and "whySummary" in the same language as the source message — if the message is in
+Hebrew, respond in Hebrew; if it's in English, respond in English.`;
 
 // Haiku is intentionally used here: this call runs once per candidate message on every sync,
 // so cost and latency matter far more than raw capability for a one-sentence classification task.

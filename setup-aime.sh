@@ -5808,7 +5808,8 @@ export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting dir
 You have read-only tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, and see recent
 automated activity. Use a tool whenever the answer depends on their actual data rather than general knowledge — don't guess.
 You cannot send emails, create events, pay bills, or change any task's status; if asked to do one of those, tell them to use
-the relevant button in the app instead of pretending to do it yourself. Keep replies short, warm, and direct.`;
+the relevant button in the app instead of pretending to do it yourself. Reply in the same language the person writes to you
+in — if they write in Hebrew, respond in Hebrew. Keep replies short, warm, and direct.`;
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/lib"
@@ -5938,7 +5939,10 @@ Respond with ONLY a JSON object, no prose, no markdown fences, matching exactly 
 
 "whySummary" is one short sentence explaining, in plain language, what in the message caused you to
 create this task (e.g. "Contains an amount, a due date, and a payment link."). If isActionable is
-false, still return valid JSON with isActionable:false and the other fields as null/empty.`;
+false, still return valid JSON with isActionable:false and the other fields as null/empty.
+
+Write "title" and "whySummary" in the same language as the source message — if the message is in
+Hebrew, respond in Hebrew; if it's in English, respond in English.`;
 
 // Haiku is intentionally used here: this call runs once per candidate message on every sync,
 // so cost and latency matter far more than raw capability for a one-sentence classification task.
@@ -6126,7 +6130,8 @@ export async function getCalendarClient(integration: Integration) {
 // messages that plausibly contain a bill, appointment, or deadline — not on
 // every newsletter in the inbox.
 const CANDIDATE_QUERY =
-  'newer_than:2d (bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline) -category:promotions';
+  'newer_than:2d (bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון") -category:promotions';
 
 export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
   const list = await gmail.users.messages.list({
