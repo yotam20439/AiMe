@@ -6135,7 +6135,7 @@ cat > "src/lib/gemini.ts" << 'AIME_HEREDOC_EOF_9f2c'
 
 export type GeminiPart =
   | { text: string }
-  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | { functionCall: { name: string; args: Record<string, unknown> }; thoughtSignature?: string }
   | { functionResponse: { name: string; response: Record<string, unknown> } };
 
 export type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
@@ -6214,7 +6214,7 @@ export async function chatWithTools(
       result = { error: err?.message || "Tool call failed" };
     }
 
-    contents.push({ role: "model", parts: [{ functionCall: { name, args: args || {} } }] });
+    contents.push({ role: "model", parts: [functionCallPart] });
     contents.push({ role: "user", parts: [{ functionResponse: { name, response: result } }] });
   }
 
