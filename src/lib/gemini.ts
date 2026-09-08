@@ -60,7 +60,7 @@ export async function chatWithTools(
   tools: ToolDeclaration[],
   executeTool: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>,
   systemText: string,
-  maxRounds = 4
+  maxRounds = 10
 ): Promise<{ reply: string; toolCalls: { name: string; args: unknown }[] }> {
   const contents = [...history];
   const toolCalls: { name: string; args: unknown }[] = [];
