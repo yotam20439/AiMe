@@ -42,6 +42,8 @@ const DICT = {
   dueTomorrow: { en: "Due tomorrow", he: "מועד מחר" },
   sittingAWhile: { en: "Been sitting a while", he: "ממתין כבר זמן מה" },
   needsAttention: { en: "Needs attention", he: "דורש תשומת לב" },
+  details: { en: "Details", he: "פרטים" },
+  less: { en: "Less", he: "פחות" },
 } satisfies Record<string, Record<Lang, string>>;
 
 export type DictKey = keyof typeof DICT;

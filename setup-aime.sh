@@ -4072,6 +4072,14 @@ export async function GET() {
   return NextResponse.json({ tasks });
 }
 
+// Both outcomes get their own label, so wherever a task ends up, its source email
+// leaves the inbox and lands somewhere clearly named for reference. Only genuinely
+// still-open tasks' emails stay in the inbox.
+const LABEL_FOR_STATUS: Record<string, string> = {
+  completed: "AiMe/Completed",
+  dismissed: "AiMe/Dismissed",
+};
+
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
@@ -4091,31 +4099,32 @@ export async function PATCH(req: Request) {
     },
   });
 
-  if (status === "completed") {
-    await prisma.activityEvent.create({
-      data: { userId, text: `Completed "${task.title}".`, kind: "tasks" },
-    });
-  }
+  // A sourceRef starting with "chat:" is a synthetic key for a task that was never
+  // actually tied to a real email — there's nothing in Gmail to move, so don't try.
+  const hasRealEmail = task.source === "gmail" && !!task.sourceRef && !task.sourceRef.startsWith("chat:");
+  const label = status ? LABEL_FOR_STATUS[status] : undefined;
 
   let inboxMoveError: string | null = null;
-  if (status === "dismissed" && task.source === "gmail" && task.sourceRef) {
+  if (label && hasRealEmail) {
     try {
       const integration = await prisma.integration.findUnique({
         where: { userId_provider: { userId, provider: "google" } },
       });
       if (integration) {
         const gmail = await getGmailClient(integration);
-        await moveMessageOutOfInbox(gmail, task.sourceRef);
+        await moveMessageOutOfInbox(gmail, task.sourceRef as string, label);
         await prisma.activityEvent.create({
-          data: { userId, text: `Moved the source email for "${task.title}" out of the inbox.`, kind: "automations" },
+          data: { userId, text: `Moved the source email for "${task.title}" to ${label}.`, kind: "automations" },
         });
       }
     } catch (err: any) {
-      // Don't fail the dismiss over this — most likely cause is a token from before
-      // gmail.modify was requested, which needs a Google reconnect to pick up.
-      console.error("Failed to move dismissed task's source email:", err);
-      inboxMoveError = "Task dismissed, but couldn't move the email — try reconnecting Google in Connections.";
+      console.error("Failed to move task's source email:", err);
+      inboxMoveError = "Saved, but couldn't move the email in Gmail — try reconnecting Google in Connections.";
     }
+  } else if (status === "completed") {
+    await prisma.activityEvent.create({
+      data: { userId, text: `Completed "${task.title}".`, kind: "tasks" },
+    });
   }
 
   return NextResponse.json({ task: updated, inboxMoveError });
@@ -4763,7 +4772,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [attachments, setAttachments] = useState<Record<string, Attachment[] | "loading">>({});
 
   async function load() {
@@ -4777,9 +4786,13 @@ export default function Dashboard() {
   useEffect(() => { load(); }, []);
 
   async function toggleExpand(tk: Task) {
-    const next = expanded === tk.id ? null : tk.id;
-    setExpanded(next);
-    if (next && tk.source === "gmail" && !attachments[tk.id]) {
+    const willOpen = !expandedIds.has(tk.id);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (willOpen) next.add(tk.id); else next.delete(tk.id);
+      return next;
+    });
+    if (willOpen && tk.source === "gmail" && !attachments[tk.id]) {
       setAttachments((a) => ({ ...a, [tk.id]: "loading" }));
       const res = await fetch(`/api/tasks/${tk.id}/attachments`);
       const data = await res.json().catch(() => ({ attachments: [] }));
@@ -4788,11 +4801,13 @@ export default function Dashboard() {
   }
 
   async function complete(id: string) {
-    await fetch("/api/tasks", {
+    const res = await fetch("/api/tasks", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, status: "completed" }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (data?.inboxMoveError) setNotice(data.inboxMoveError);
     load();
   }
 
@@ -4827,7 +4842,7 @@ export default function Dashboard() {
           <div className="grid2">
             {open.map((tk) => {
               const badge = urgencyBadge(tk, t);
-              const isOpen = expanded === tk.id;
+              const isOpen = expandedIds.has(tk.id);
               const atts = attachments[tk.id];
               return (
                 <div className={`tcard${tk.priority === "urgent" ? " urgent" : ""}`} key={tk.id}>
@@ -4863,7 +4878,7 @@ export default function Dashboard() {
                     <button className="btn" style={{ width: "auto" }} onClick={() => complete(tk.id)}>{t("complete")}</button>
                     <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(tk.id)}>{t("dismiss")}</button>
                     <button className="tcard-toggle" onClick={() => toggleExpand(tk)}>
-                      {isOpen ? "▲ Less" : "▼ Details"}
+                      {isOpen ? `▲ ${t("less")}` : `▼ ${t("details")}`}
                     </button>
                   </div>
 
@@ -5560,7 +5575,6 @@ html[dir="rtl"] .tcard .why{padding-left:0;border-left:none;padding-right:10px;b
 .pill.red{background:var(--red-weak);color:var(--red)}
 .pill.amber{background:var(--amber-weak);color:var(--amber)}
 .tcard-toggle{background:none;border:none;color:var(--text-2);font-size:12px;cursor:pointer;margin-left:auto;padding:4px 2px}
-html[dir="rtl"] .tcard-toggle{margin-left:0;margin-right:auto}
 .tcard-details{border-top:1px solid var(--border);margin-top:2px;padding-top:10px;display:flex;flex-direction:column;gap:8px}
 .tcard-details dl{display:grid;grid-template-columns:88px 1fr;gap:5px 10px;font-size:12.5px;margin:0}
 .tcard-details dt{color:var(--text-3)}
@@ -6349,8 +6363,10 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
     description:
       "Add a bill or an important message to the person's Today list, the same way AiMe's automatic background " +
       "check already does. Check search_tasks first so you don't create a duplicate of something already tracked. " +
-      "If this came from a specific Gmail message, pass its id as sourceRef so it lines up with the background " +
-      "sync and never gets created twice. For bills, call get_email_details first and pass the real payment link " +
+      "If this came from an email, you MUST pass its id (from search_gmail's results) as sourceRef — never skip this, " +
+      "it costs no extra tool call and without it the task can't link back to the source at all, making it useless. " +
+      "This also lines up with the background sync so the same email never becomes two tasks. For bills, call " +
+      "get_email_details first and pass the real payment link " +
       "as actionUrl if one exists.",
     parameters: {
       type: "object",
@@ -6365,7 +6381,7 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
         emailDate: { type: "string", description: "The date the source email was actually sent (from get_email_details or search_gmail), as an ISO date. Omit if unknown." },
         actionUrl: { type: "string", description: "A real payment/action link from get_email_details, if one exists. Never invent one." },
         why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
-        sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
+        sourceRef: { type: "string", description: "Required whenever this came from an email: the Gmail message id from search_gmail's results, verbatim." },
       },
       required: ["title"],
     },
@@ -6538,6 +6554,11 @@ that tool actually returns, never invent or guess one. Then call search_tasks to
 create_task, passing the Gmail message's id as sourceRef, the email's actual sent date (from get_email_details or the
 search result) as emailDate, and the real link as actionUrl if you found one. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
 permission.
+
+Non-negotiable rule: search_gmail already gives you each message's real id in its results, at zero extra cost. Any time
+you call create_task for something found in an email, sourceRef must be that id — not skipped, not left out to save a
+step. A task with no sourceRef has no way to link back to the email at all, which makes it something the person can only
+mark done or ignore, never actually act on. That defeats the entire point, so never create an email-derived task without it.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.
@@ -7089,6 +7110,8 @@ const DICT = {
   dueTomorrow: { en: "Due tomorrow", he: "מועד מחר" },
   sittingAWhile: { en: "Been sitting a while", he: "ממתין כבר זמן מה" },
   needsAttention: { en: "Needs attention", he: "דורש תשומת לב" },
+  details: { en: "Details", he: "פרטים" },
+  less: { en: "Less", he: "פחות" },
 } satisfies Record<string, Record<Lang, string>>;
 
 export type DictKey = keyof typeof DICT;

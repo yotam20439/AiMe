@@ -69,8 +69,10 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
     description:
       "Add a bill or an important message to the person's Today list, the same way AiMe's automatic background " +
       "check already does. Check search_tasks first so you don't create a duplicate of something already tracked. " +
-      "If this came from a specific Gmail message, pass its id as sourceRef so it lines up with the background " +
-      "sync and never gets created twice. For bills, call get_email_details first and pass the real payment link " +
+      "If this came from an email, you MUST pass its id (from search_gmail's results) as sourceRef — never skip this, " +
+      "it costs no extra tool call and without it the task can't link back to the source at all, making it useless. " +
+      "This also lines up with the background sync so the same email never becomes two tasks. For bills, call " +
+      "get_email_details first and pass the real payment link " +
       "as actionUrl if one exists.",
     parameters: {
       type: "object",
@@ -85,7 +87,7 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
         emailDate: { type: "string", description: "The date the source email was actually sent (from get_email_details or search_gmail), as an ISO date. Omit if unknown." },
         actionUrl: { type: "string", description: "A real payment/action link from get_email_details, if one exists. Never invent one." },
         why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
-        sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
+        sourceRef: { type: "string", description: "Required whenever this came from an email: the Gmail message id from search_gmail's results, verbatim." },
       },
       required: ["title"],
     },
@@ -258,6 +260,11 @@ that tool actually returns, never invent or guess one. Then call search_tasks to
 create_task, passing the Gmail message's id as sourceRef, the email's actual sent date (from get_email_details or the
 search result) as emailDate, and the real link as actionUrl if you found one. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
 permission.
+
+Non-negotiable rule: search_gmail already gives you each message's real id in its results, at zero extra cost. Any time
+you call create_task for something found in an email, sourceRef must be that id — not skipped, not left out to save a
+step. A task with no sourceRef has no way to link back to the email at all, which makes it something the person can only
+mark done or ignore, never actually act on. That defeats the entire point, so never create an email-derived task without it.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.

@@ -22,6 +22,14 @@ export async function GET() {
   return NextResponse.json({ tasks });
 }
 
+// Both outcomes get their own label, so wherever a task ends up, its source email
+// leaves the inbox and lands somewhere clearly named for reference. Only genuinely
+// still-open tasks' emails stay in the inbox.
+const LABEL_FOR_STATUS: Record<string, string> = {
+  completed: "AiMe/Completed",
+  dismissed: "AiMe/Dismissed",
+};
+
 export async function PATCH(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
@@ -41,31 +49,32 @@ export async function PATCH(req: Request) {
     },
   });
 
-  if (status === "completed") {
-    await prisma.activityEvent.create({
-      data: { userId, text: `Completed "${task.title}".`, kind: "tasks" },
-    });
-  }
+  // A sourceRef starting with "chat:" is a synthetic key for a task that was never
+  // actually tied to a real email — there's nothing in Gmail to move, so don't try.
+  const hasRealEmail = task.source === "gmail" && !!task.sourceRef && !task.sourceRef.startsWith("chat:");
+  const label = status ? LABEL_FOR_STATUS[status] : undefined;
 
   let inboxMoveError: string | null = null;
-  if (status === "dismissed" && task.source === "gmail" && task.sourceRef) {
+  if (label && hasRealEmail) {
     try {
       const integration = await prisma.integration.findUnique({
         where: { userId_provider: { userId, provider: "google" } },
       });
       if (integration) {
         const gmail = await getGmailClient(integration);
-        await moveMessageOutOfInbox(gmail, task.sourceRef);
+        await moveMessageOutOfInbox(gmail, task.sourceRef as string, label);
         await prisma.activityEvent.create({
-          data: { userId, text: `Moved the source email for "${task.title}" out of the inbox.`, kind: "automations" },
+          data: { userId, text: `Moved the source email for "${task.title}" to ${label}.`, kind: "automations" },
         });
       }
     } catch (err: any) {
-      // Don't fail the dismiss over this — most likely cause is a token from before
-      // gmail.modify was requested, which needs a Google reconnect to pick up.
-      console.error("Failed to move dismissed task's source email:", err);
-      inboxMoveError = "Task dismissed, but couldn't move the email — try reconnecting Google in Connections.";
+      console.error("Failed to move task's source email:", err);
+      inboxMoveError = "Saved, but couldn't move the email in Gmail — try reconnecting Google in Connections.";
     }
+  } else if (status === "completed") {
+    await prisma.activityEvent.create({
+      data: { userId, text: `Completed "${task.title}".`, kind: "tasks" },
+    });
   }
 
   return NextResponse.json({ task: updated, inboxMoveError });

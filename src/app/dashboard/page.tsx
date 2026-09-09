@@ -70,7 +70,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [attachments, setAttachments] = useState<Record<string, Attachment[] | "loading">>({});
 
   async function load() {
@@ -84,9 +84,13 @@ export default function Dashboard() {
   useEffect(() => { load(); }, []);
 
   async function toggleExpand(tk: Task) {
-    const next = expanded === tk.id ? null : tk.id;
-    setExpanded(next);
-    if (next && tk.source === "gmail" && !attachments[tk.id]) {
+    const willOpen = !expandedIds.has(tk.id);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (willOpen) next.add(tk.id); else next.delete(tk.id);
+      return next;
+    });
+    if (willOpen && tk.source === "gmail" && !attachments[tk.id]) {
       setAttachments((a) => ({ ...a, [tk.id]: "loading" }));
       const res = await fetch(`/api/tasks/${tk.id}/attachments`);
       const data = await res.json().catch(() => ({ attachments: [] }));
@@ -95,11 +99,13 @@ export default function Dashboard() {
   }
 
   async function complete(id: string) {
-    await fetch("/api/tasks", {
+    const res = await fetch("/api/tasks", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, status: "completed" }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (data?.inboxMoveError) setNotice(data.inboxMoveError);
     load();
   }
 
@@ -134,7 +140,7 @@ export default function Dashboard() {
           <div className="grid2">
             {open.map((tk) => {
               const badge = urgencyBadge(tk, t);
-              const isOpen = expanded === tk.id;
+              const isOpen = expandedIds.has(tk.id);
               const atts = attachments[tk.id];
               return (
                 <div className={`tcard${tk.priority === "urgent" ? " urgent" : ""}`} key={tk.id}>
@@ -170,7 +176,7 @@ export default function Dashboard() {
                     <button className="btn" style={{ width: "auto" }} onClick={() => complete(tk.id)}>{t("complete")}</button>
                     <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(tk.id)}>{t("dismiss")}</button>
                     <button className="tcard-toggle" onClick={() => toggleExpand(tk)}>
-                      {isOpen ? "▲ Less" : "▼ Details"}
+                      {isOpen ? `▲ ${t("less")}` : `▼ ${t("details")}`}
                     </button>
                   </div>
 
