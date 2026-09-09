@@ -41,11 +41,11 @@ export async function getCalendarClient(integration: Integration) {
 // messages that plausibly contain a bill, appointment, or deadline — not on
 // every newsletter in the inbox.
 const CANDIDATE_QUERY =
-  'newer_than:14d (bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
+  '(bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
   'invite OR invitation OR RSVP OR reminder OR ' +
-  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה) -category:promotions';
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה)';
 
-export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
+export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
   const list = await gmail.users.messages.list({
     userId: "me",
     q: CANDIDATE_QUERY,
@@ -72,4 +72,30 @@ export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
     })
   );
   return messages;
+}
+
+// The label a dismissed task's source email gets moved into. Gmail doesn't have real
+// folders — moving a message "out of the inbox" means removing the INBOX label and
+// adding this one, which Gmail's UI then displays as a folder-like label.
+export const DISMISSED_LABEL_NAME = "AiMe/Dismissed";
+
+async function getOrCreateLabel(gmail: gmail_v1.Gmail, name: string): Promise<string> {
+  const list = await gmail.users.labels.list({ userId: "me" });
+  const existing = list.data.labels?.find((l) => l.name === name);
+  if (existing?.id) return existing.id;
+
+  const created = await gmail.users.labels.create({
+    userId: "me",
+    requestBody: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
+  });
+  return created.data.id!;
+}
+
+export async function moveMessageOutOfInbox(gmail: gmail_v1.Gmail, messageId: string, labelName = DISMISSED_LABEL_NAME) {
+  const labelId = await getOrCreateLabel(gmail, labelName);
+  await gmail.users.messages.modify({
+    userId: "me",
+    id: messageId,
+    requestBody: { removeLabelIds: ["INBOX"], addLabelIds: [labelId] },
+  });
 }

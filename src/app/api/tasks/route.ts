@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getGmailClient, moveMessageOutOfInbox } from "@/lib/gmail";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -46,5 +47,26 @@ export async function PATCH(req: Request) {
     });
   }
 
-  return NextResponse.json({ task: updated });
+  let inboxMoveError: string | null = null;
+  if (status === "dismissed" && task.source === "gmail" && task.sourceRef) {
+    try {
+      const integration = await prisma.integration.findUnique({
+        where: { userId_provider: { userId, provider: "google" } },
+      });
+      if (integration) {
+        const gmail = await getGmailClient(integration);
+        await moveMessageOutOfInbox(gmail, task.sourceRef);
+        await prisma.activityEvent.create({
+          data: { userId, text: `Moved the source email for "${task.title}" out of the inbox.`, kind: "automations" },
+        });
+      }
+    } catch (err: any) {
+      // Don't fail the dismiss over this — most likely cause is a token from before
+      // gmail.modify was requested, which needs a Google reconnect to pick up.
+      console.error("Failed to move dismissed task's source email:", err);
+      inboxMoveError = "Task dismissed, but couldn't move the email — try reconnecting Google in Connections.";
+    }
+  }
+
+  return NextResponse.json({ task: updated, inboxMoveError });
 }

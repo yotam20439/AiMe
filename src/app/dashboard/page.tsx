@@ -26,12 +26,25 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, []);
 
+  const [notice, setNotice] = useState<string | null>(null);
+
   async function complete(id: string) {
     await fetch("/api/tasks", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, status: "completed" }),
     });
+    load();
+  }
+
+  async function dismiss(id: string) {
+    const res = await fetch("/api/tasks", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, status: "dismissed" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data?.inboxMoveError) setNotice(data.inboxMoveError);
     load();
   }
 
@@ -51,6 +64,7 @@ export default function Dashboard() {
       </div>
       <div className="content">
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
+        {notice && <div className="error">{notice}</div>}
         {loading ? (
           <p style={{ color: "var(--text-2)" }}>{t("loading")}</p>
         ) : open.length === 0 ? (
@@ -66,6 +80,7 @@ export default function Dashboard() {
                 <small>{t2.aiSummary ?? `${t2.source} · ${t2.priority}`}{t2.due ? ` · Due ${new Date(t2.due).toLocaleDateString()}` : ""}</small>
               </div>
               <button className="btn" style={{ width: "auto" }} onClick={() => complete(t2.id)}>{t("complete")}</button>
+              <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(t2.id)}>Dismiss</button>
             </div>
           ))
         )}

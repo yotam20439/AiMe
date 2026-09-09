@@ -3938,6 +3938,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getGmailClient, moveMessageOutOfInbox } from "@/lib/gmail";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -3982,7 +3983,28 @@ export async function PATCH(req: Request) {
     });
   }
 
-  return NextResponse.json({ task: updated });
+  let inboxMoveError: string | null = null;
+  if (status === "dismissed" && task.source === "gmail" && task.sourceRef) {
+    try {
+      const integration = await prisma.integration.findUnique({
+        where: { userId_provider: { userId, provider: "google" } },
+      });
+      if (integration) {
+        const gmail = await getGmailClient(integration);
+        await moveMessageOutOfInbox(gmail, task.sourceRef);
+        await prisma.activityEvent.create({
+          data: { userId, text: `Moved the source email for "${task.title}" out of the inbox.`, kind: "automations" },
+        });
+      }
+    } catch (err: any) {
+      // Don't fail the dismiss over this — most likely cause is a token from before
+      // gmail.modify was requested, which needs a Google reconnect to pick up.
+      console.error("Failed to move dismissed task's source email:", err);
+      inboxMoveError = "Task dismissed, but couldn't move the email — try reconnecting Google in Connections.";
+    }
+  }
+
+  return NextResponse.json({ task: updated, inboxMoveError });
 }
 AIME_HEREDOC_EOF_9f2c
 
@@ -4589,12 +4611,25 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, []);
 
+  const [notice, setNotice] = useState<string | null>(null);
+
   async function complete(id: string) {
     await fetch("/api/tasks", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id, status: "completed" }),
     });
+    load();
+  }
+
+  async function dismiss(id: string) {
+    const res = await fetch("/api/tasks", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, status: "dismissed" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data?.inboxMoveError) setNotice(data.inboxMoveError);
     load();
   }
 
@@ -4614,6 +4649,7 @@ export default function Dashboard() {
       </div>
       <div className="content">
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
+        {notice && <div className="error">{notice}</div>}
         {loading ? (
           <p style={{ color: "var(--text-2)" }}>{t("loading")}</p>
         ) : open.length === 0 ? (
@@ -4629,6 +4665,7 @@ export default function Dashboard() {
                 <small>{t2.aiSummary ?? `${t2.source} · ${t2.priority}`}{t2.due ? ` · Due ${new Date(t2.due).toLocaleDateString()}` : ""}</small>
               </div>
               <button className="btn" style={{ width: "auto" }} onClick={() => complete(t2.id)}>{t("complete")}</button>
+              <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(t2.id)}>Dismiss</button>
             </div>
           ))
         )}
@@ -6406,11 +6443,11 @@ export async function getCalendarClient(integration: Integration) {
 // messages that plausibly contain a bill, appointment, or deadline — not on
 // every newsletter in the inbox.
 const CANDIDATE_QUERY =
-  'newer_than:14d (bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
+  '(bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
   'invite OR invitation OR RSVP OR reminder OR ' +
-  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה) -category:promotions';
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה)';
 
-export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
+export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
   const list = await gmail.users.messages.list({
     userId: "me",
     q: CANDIDATE_QUERY,
@@ -6438,17 +6475,45 @@ export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 15) {
   );
   return messages;
 }
+
+// The label a dismissed task's source email gets moved into. Gmail doesn't have real
+// folders — moving a message "out of the inbox" means removing the INBOX label and
+// adding this one, which Gmail's UI then displays as a folder-like label.
+export const DISMISSED_LABEL_NAME = "AiMe/Dismissed";
+
+async function getOrCreateLabel(gmail: gmail_v1.Gmail, name: string): Promise<string> {
+  const list = await gmail.users.labels.list({ userId: "me" });
+  const existing = list.data.labels?.find((l) => l.name === name);
+  if (existing?.id) return existing.id;
+
+  const created = await gmail.users.labels.create({
+    userId: "me",
+    requestBody: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
+  });
+  return created.data.id!;
+}
+
+export async function moveMessageOutOfInbox(gmail: gmail_v1.Gmail, messageId: string, labelName = DISMISSED_LABEL_NAME) {
+  const labelId = await getOrCreateLabel(gmail, labelName);
+  await gmail.users.messages.modify({
+    userId: "me",
+    id: messageId,
+    requestBody: { removeLabelIds: ["INBOX"], addLabelIds: [labelId] },
+  });
+}
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/lib"
 cat > "src/lib/google.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { google } from "googleapis";
 
-// Read-only by default, on purpose. calendar.events is included only so a user
-// can click "Add to calendar" on a AiMe suggestion — that still requires their
-// explicit click (see api/calendar/add), never a silent write.
+// gmail.modify (not just .readonly) is required so a dismissed task can move its
+// source email out of the inbox into a label — it's a superset of read access, so
+// nothing else changes. calendar.events is included only so a user can click "Add
+// to calendar" on a AiMe suggestion — that still requires their explicit click
+// (see api/calendar/add), never a silent write.
 export const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/drive.readonly",
