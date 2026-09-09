@@ -1,4 +1,4 @@
-setup-aime.sh#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -e
 echo "Creating AiMe project files..."
 
@@ -317,6 +317,10 @@ model Task {
   // A real link pulled from the source email's body (e.g. a payment page) — never
   // invented by the AI, only ever a URL that actually appeared in the message.
   actionUrl String?
+  // When the source email/message was actually sent — distinct from createdAt, which
+  // is only ever "when AiMe found this" and would misleadingly say "today" for an
+  // old bill that just happened to get scraped now.
+  emailDate DateTime?
 
   // De-dupe key: e.g. a Gmail message id or "telegram:<chatId>:<messageId>".
   // Prevents the same email being turned into two tasks on the next sync.
@@ -3222,6 +3226,33 @@ jRo1atSoUaNGjRo1atSoUaNGjRo1atSoUaNGjRo1atSoUaNGjRo1atSoUaNGjRo1atSoUaNGjRo1atSo
 atSoUaNGjRo1atSoUeP0x/8P1CYQIUJHBrAAAAAASUVORK5CYII=
 AIME_HEREDOC_EOF_9f2c
 
+mkdir -p "src/app/api/admin/fix-sources"
+cat > "src/app/api/admin/fix-sources/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+
+// Protected the same way as the cron endpoint. Safe to run more than once — it only
+// ever touches rows still carrying the old bug's signature (source:'chat' with a
+// sourceRef that isn't one of chat's own synthetic keys).
+export async function GET(req: Request) {
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const result = await prisma.task.updateMany({
+    where: {
+      source: "chat",
+      sourceRef: { not: null },
+      NOT: { sourceRef: { startsWith: "chat:" } },
+    },
+    data: { source: "gmail" },
+  });
+
+  return NextResponse.json({ ok: true, fixed: result.count });
+}
+AIME_HEREDOC_EOF_9f2c
+
 mkdir -p "src/app/api/auth/[...nextauth]"
 cat > "src/app/api/auth/[...nextauth]/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import NextAuth from "next-auth";
@@ -3398,6 +3429,7 @@ export async function GET(req: Request) {
             currency: extracted.currency ?? null,
             due: extracted.dueDate ? new Date(extracted.dueDate) : null,
             actionUrl: extracted.actionUrl ?? null,
+            emailDate: msg.date && !isNaN(new Date(msg.date).getTime()) ? new Date(msg.date) : null,
             aiSummary: extracted.whySummary || null,
             why: `Found in an email from ${msg.from}, subject "${msg.subject}".`,
           },
@@ -4384,8 +4416,8 @@ mkdir -p "src/app/chat"
 cat > "src/app/chat/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Message = { id: string; role: "user" | "model"; content: string };
 
@@ -4435,21 +4467,19 @@ export default function ChatPage() {
     "just one broad search, and add anything actionable you find as a task. Then summarize what you found and what you added.";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <div style={{ flex: 1 }} />
-        <button
-          className="btn"
-          style={{ width: "auto" }}
-          disabled={sending}
-          onClick={(e) => send(e as any, REFRESH_PROMPT)}
-        >
-          🔄 {t("checkNow")}
-        </button>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
-      </div>
+    <AppShell>
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        <div className="topbar">
+          <div style={{ flex: 1 }} />
+          <button
+            className="btn"
+            style={{ width: "auto" }}
+            disabled={sending}
+            onClick={(e) => send(e as any, REFRESH_PROMPT)}
+          >
+            🔄 {t("checkNow")}
+          </button>
+        </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -4497,7 +4527,8 @@ export default function ChatPage() {
         />
         <button className="btn primary" style={{ width: "auto" }} disabled={sending}>{t("send")}</button>
       </form>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 AIME_HEREDOC_EOF_9f2c
@@ -4507,8 +4538,8 @@ cat > "src/app/connections/connections-client.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Status = { integrations: { provider: string; status: string; accountLabel?: string }[] };
 
@@ -4559,12 +4590,7 @@ export default function ConnectionsClient() {
   }
 
   return (
-    <div>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
-      </div>
+    <AppShell>
       <div className="content">
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("connectionsTitle")}</h1>
         <p style={{ color: "var(--text-2)" }}>{t("connectionsLead")}</p>
@@ -4644,7 +4670,7 @@ export default function ConnectionsClient() {
           </div>
         ))}
       </div>
-    </div>
+    </AppShell>
   );
 }
 AIME_HEREDOC_EOF_9f2c
@@ -4667,15 +4693,14 @@ mkdir -p "src/app/dashboard"
 cat > "src/app/dashboard/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useState } from "react";
-import { useSession, signOut } from "next-auth/react";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Task = {
   id: string; title: string; type: string; source: string; priority: string; status: string;
   category: string; due: string | null; amount: number | null; currency: string | null;
   aiSummary: string | null; why: string | null; sourceRef: string | null; actionUrl: string | null;
-  createdAt: string; user: { name: string };
+  emailDate: string | null; createdAt: string; user: { name: string };
 };
 
 type Attachment = { attachmentId: string; filename: string; mimeType: string; size?: number };
@@ -4688,9 +4713,9 @@ function daysBetween(a: Date, b: Date) {
   return Math.round((a.getTime() - b.getTime()) / 86400000);
 }
 
-// Priority first, then soonest due date, then oldest-created — so something urgent
-// today outranks something normal next week, and among equals, what's been
-// waiting longest surfaces first rather than getting buried by newer arrivals.
+// Priority first, then soonest due date, then oldest-sent — so something urgent
+// today outranks something normal next week, and among equals, whatever was
+// actually sent longest ago surfaces first rather than getting buried by newer arrivals.
 function smartSort(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
@@ -4698,7 +4723,9 @@ function smartSort(tasks: Task[]): Task[] {
     const ad = a.due ? new Date(a.due).getTime() : Infinity;
     const bd = b.due ? new Date(b.due).getTime() : Infinity;
     if (ad !== bd) return ad - bd;
-    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    const aSent = new Date(a.emailDate ?? a.createdAt).getTime();
+    const bSent = new Date(b.emailDate ?? b.createdAt).getTime();
+    return aSent - bSent;
   });
 }
 
@@ -4711,7 +4738,10 @@ function urgencyBadge(t: Task, tt: (k: any) => string): { label: string; tone: "
     if (diff === 0) return { label: tt("dueToday"), tone: "red" };
     if (diff === 1) return { label: tt("dueTomorrow"), tone: "amber" };
   }
-  if (daysBetween(now, new Date(t.createdAt)) >= STALE_DAYS) {
+  // Staleness is measured from when the email was actually sent, not from when AiMe
+  // happened to find it — an old bill that just got scraped is still old.
+  const sentAt = new Date(t.emailDate ?? t.createdAt);
+  if (daysBetween(now, sentAt) >= STALE_DAYS) {
     return { label: tt("sittingAWhile"), tone: "amber" };
   }
   return null;
@@ -4729,7 +4759,6 @@ function attachmentUrl(messageId: string, a: Attachment) {
 }
 
 export default function Dashboard() {
-  const { data: session } = useSession();
   const { t } = useLang();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -4782,16 +4811,7 @@ export default function Dashboard() {
   const done = tasks.filter((tk) => tk.status === "completed");
 
   return (
-    <div>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <span style={{ color: "var(--text-2)", fontSize: 13 }}>{session?.user?.name}</span>
-        <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/chat">{t("chat")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/household">{t("account")}</Link>
-        <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>{t("signOut")}</button>
-      </div>
+    <AppShell>
       <div className="content" style={{ maxWidth: 1080 }}>
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
         {notice && <div className="error">{notice}</div>}
@@ -4853,6 +4873,7 @@ export default function Dashboard() {
                         <dt>Category</dt><dd>{tk.category}</dd>
                         <dt>Priority</dt><dd>{tk.priority}</dd>
                         {tk.due && <><dt>Due</dt><dd>{new Date(tk.due).toLocaleDateString()}</dd></>}
+                        {tk.emailDate && <><dt>Sent</dt><dd>{new Date(tk.emailDate).toLocaleString()}</dd></>}
                         <dt>Detected</dt><dd>{new Date(tk.createdAt).toLocaleString()}</dd>
                         <dt>Source</dt><dd>{tk.source}</dd>
                         {tk.why && <><dt>Why</dt><dd>{tk.why}</dd></>}
@@ -4893,7 +4914,7 @@ export default function Dashboard() {
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
 AIME_HEREDOC_EOF_9f2c
@@ -5546,14 +5567,62 @@ html[dir="rtl"] .tcard-toggle{margin-left:0;margin-right:auto}
 .tcard-details dd{margin:0;color:var(--text)}
 .attach-item{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:12.5px}
 .attach-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- app shell / sidebar ---------- */
+.app-shell{display:flex;min-height:100vh}
+/* Flipping flex-direction puts the sidebar on the right for Hebrew, left for English —
+   same trick used everywhere else in this file for RTL, no separate positioning logic needed. */
+html[dir="rtl"] .app-shell{flex-direction:row-reverse}
+.app-sidebar{
+  width:212px;flex:none;background:var(--surface-2);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;height:100vh;position:sticky;top:0;padding:12px 8px;
+  transition:width .15s ease;
+}
+html[dir="rtl"] .app-sidebar{border-right:none;border-left:1px solid var(--border)}
+.app-sidebar.collapsed{width:60px}
+.app-sidebar-top{display:flex;align-items:center;gap:6px;padding:6px 4px 14px}
+.app-brand{display:flex;align-items:center;gap:8px;background:none;border:none;cursor:pointer;padding:4px;flex:1;min-width:0}
+.app-brand img{width:22px;height:22px;border-radius:6px;flex:none}
+.app-brand b{font-size:15px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-collapse-btn{background:none;border:none;color:var(--text-3);cursor:pointer;padding:6px;border-radius:6px;flex:none}
+.app-collapse-btn:hover{background:var(--surface-3);color:var(--text)}
+.app-nav{display:flex;flex-direction:column;gap:2px}
+.app-nav-item{
+  display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;
+  background:none;border:none;cursor:pointer;color:var(--text-2);font-size:13.5px;text-align:left;width:100%;
+}
+html[dir="rtl"] .app-nav-item{text-align:right}
+.app-nav-item:hover{background:var(--surface-3);color:var(--text)}
+.app-nav-item.on{background:var(--accent-weak);color:var(--accent);font-weight:500}
+.app-nav-ic{display:flex;flex:none}
+.app-sidebar-bottom{margin-top:auto;display:flex;flex-direction:column;gap:4px;padding-top:10px;border-top:1px solid var(--border)}
+.app-user-name{font-size:12px;color:var(--text-3);padding:4px 10px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-main{flex:1;min-width:0}
+
+@media (max-width:820px){
+  .app-sidebar{position:fixed;z-index:30;width:60px}
+  .app-sidebar:not(.collapsed){width:60px}
+  .app-sidebar .lbl,.app-brand b,.app-user-name{display:none}
+  .app-main{margin-left:60px}
+  html[dir="rtl"] .app-main{margin-left:0;margin-right:60px}
+  .app-collapse-btn{display:none}
+}
+@media (max-width:640px){
+  .content{padding:16px 12px 60px !important;max-width:100% !important}
+  .grid2{grid-template-columns:1fr}
+  .tcard-details dl{grid-template-columns:78px 1fr}
+  .conn-row{flex-wrap:wrap}
+  .topbar{padding:0 12px;flex-wrap:wrap;height:auto;gap:8px}
+  .ob-card,.panel{padding:20px}
+}
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/app/household"
 cat > "src/app/household/page.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Household = { name: string; inviteCode: string; members: { id: string; name: string; email: string; role: string }[] };
 
@@ -5566,13 +5635,7 @@ export default function HouseholdPage() {
   }, []);
 
   return (
-    <div>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("backToToday")}</Link>
-      </div>
+    <AppShell>
       <div className="content">
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("accountTitle")}</h1>
         {household && (
@@ -5594,7 +5657,7 @@ export default function HouseholdPage() {
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
 AIME_HEREDOC_EOF_9f2c
@@ -6015,6 +6078,83 @@ export default function SignupPage() {
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/components"
+cat > "src/components/AppShell.tsx" << 'AIME_HEREDOC_EOF_9f2c'
+"use client";
+import { useEffect, useState } from "react";
+import { useSession, signOut } from "next-auth/react";
+import { usePathname, useRouter } from "next/navigation";
+import { useLang } from "@/lib/i18n";
+import { TodayIcon, ChatIcon, PlugIcon, UserIcon, LogOutIcon, ChevronDoubleIcon } from "@/lib/icons";
+
+const STORAGE_KEY = "aime:sidebarCollapsed";
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession();
+  const { t, lang } = useLang();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem(STORAGE_KEY) === "1");
+  }, []);
+
+  function toggle() {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+  }
+
+  const items: { href: string; label: string; icon: React.ReactNode }[] = [
+    { href: "/dashboard", label: t("today"), icon: <TodayIcon /> },
+    { href: "/chat", label: t("chat"), icon: <ChatIcon /> },
+    { href: "/connections", label: t("connections"), icon: <PlugIcon /> },
+    { href: "/household", label: t("account"), icon: <UserIcon /> },
+  ];
+
+  return (
+    <div className="app-shell">
+      <aside className={`app-sidebar${collapsed ? " collapsed" : ""}`}>
+        <div className="app-sidebar-top">
+          <button className="app-brand" onClick={() => router.push("/dashboard")} aria-label="AiMe">
+            <img src="/logo-mark.png" alt="" />
+            {!collapsed && <b>AiMe</b>}
+          </button>
+          <button className="app-collapse-btn" onClick={toggle} aria-label={collapsed ? "Expand menu" : "Collapse menu"}>
+            <ChevronDoubleIcon flipped={lang === "he" ? !collapsed : collapsed} />
+          </button>
+        </div>
+
+        <nav className="app-nav">
+          {items.map((it) => (
+            <button
+              key={it.href}
+              className={`app-nav-item${pathname === it.href ? " on" : ""}`}
+              onClick={() => router.push(it.href)}
+              title={collapsed ? it.label : undefined}
+            >
+              <span className="app-nav-ic">{it.icon}</span>
+              {!collapsed && <span className="lbl">{it.label}</span>}
+            </button>
+          ))}
+        </nav>
+
+        <div className="app-sidebar-bottom">
+          {!collapsed && <div className="app-user-name">{session?.user?.name}</div>}
+          <button className="app-nav-item" onClick={() => signOut({ callbackUrl: "/login" })} title={collapsed ? t("signOut") : undefined}>
+            <span className="app-nav-ic"><LogOutIcon /></span>
+            {!collapsed && <span className="lbl">{t("signOut")}</span>}
+          </button>
+        </div>
+      </aside>
+
+      <main className="app-main">{children}</main>
+    </div>
+  );
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/components"
 cat > "src/components/FloatingChat.tsx" << 'AIME_HEREDOC_EOF_9f2c'
 "use client";
 import { useEffect, useRef, useState } from "react";
@@ -6032,11 +6172,12 @@ const REFRESH_PROMPT =
 export default function FloatingChat() {
   const { status } = useSession();
   const pathname = usePathname();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const { messages, sending, error, send } = useAssistantChat(open);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const sideKey = lang === "he" ? "left" : "right";
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -6058,7 +6199,7 @@ export default function FloatingChat() {
         onClick={() => setOpen((o) => !o)}
         aria-label={open ? "Close AiMe chat" : "Open AiMe chat"}
         style={{
-          position: "fixed", bottom: 20, right: 20, width: 52, height: 52, borderRadius: "50%",
+          position: "fixed", bottom: 20, [sideKey]: 20, width: 52, height: 52, borderRadius: "50%",
           background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer",
           boxShadow: "0 8px 24px rgba(0,0,0,.25)", zIndex: 200, display: "grid", placeItems: "center",
           fontSize: 22, lineHeight: 1,
@@ -6070,7 +6211,7 @@ export default function FloatingChat() {
       {open && (
         <div
           style={{
-            position: "fixed", bottom: 84, right: 20, width: 340, maxWidth: "calc(100vw - 24px)",
+            position: "fixed", bottom: 84, [sideKey]: 20, width: 340, maxWidth: "calc(100vw - 24px)",
             height: 460, maxHeight: "calc(100vh - 120px)", background: "var(--surface)",
             border: "1px solid var(--border)", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.28)",
             zIndex: 199, display: "flex", flexDirection: "column", overflow: "hidden",
@@ -6221,6 +6362,7 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
         amount: { type: "string", description: "Amount as a plain number string, if this is a bill. Omit otherwise." },
         currency: { type: "string", description: "e.g. ILS or USD. Omit if not a bill." },
         dueDate: { type: "string", description: "ISO date (YYYY-MM-DD) if known. Omit otherwise." },
+        emailDate: { type: "string", description: "The date the source email was actually sent (from get_email_details or search_gmail), as an ISO date. Omit if unknown." },
         actionUrl: { type: "string", description: "A real payment/action link from get_email_details, if one exists. Never invent one." },
         why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
         sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
@@ -6329,6 +6471,8 @@ export function makeToolExecutor(userId: string) {
 
         const dueRaw = args.dueDate ? new Date(String(args.dueDate)) : null;
         const due = dueRaw && !isNaN(dueRaw.getTime()) ? dueRaw : null;
+        const emailDateRaw = args.emailDate ? new Date(String(args.emailDate)) : null;
+        const emailDate = emailDateRaw && !isNaN(emailDateRaw.getTime()) ? emailDateRaw : null;
 
         // Only accept an actionUrl that's a real, well-formed http(s) link — cheap guard
         // against a malformed or invented value slipping through.
@@ -6350,6 +6494,7 @@ export function makeToolExecutor(userId: string) {
             currency: args.currency ? String(args.currency) : null,
             due,
             actionUrl,
+            emailDate,
             why: args.why ? String(args.why) : null,
             aiSummary: args.why ? String(args.why) : null,
           },
@@ -6390,8 +6535,8 @@ there's nothing there.
 
 For a bill, call get_email_details on it first to read the real body and find any payment link — only ever use a link
 that tool actually returns, never invent or guess one. Then call search_tasks to make sure it isn't already tracked, then
-create_task, passing the Gmail message's id as sourceRef and the real link as actionUrl if you found one. This mirrors
-what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
+create_task, passing the Gmail message's id as sourceRef, the email's actual sent date (from get_email_details or the
+search result) as emailDate, and the real link as actionUrl if you found one. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
 permission.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
@@ -6974,6 +7119,56 @@ export function useLang() {
   const t = useCallback((key: DictKey) => DICT[key]?.[lang] ?? String(key), [lang]);
 
   return { lang, setLang, t };
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/lib"
+cat > "src/lib/icons.tsx" << 'AIME_HEREDOC_EOF_9f2c'
+// Simple stroke-style icons, no dependency needed. Each takes an optional size.
+type IconProps = { size?: number };
+
+export function TodayIcon({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
+  );
+}
+export function ChatIcon({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5a8.4 8.4 0 0 1-.9-3.9 8.4 8.4 0 0 1 8.4-8.5h.5a8.4 8.4 0 0 1 8 8z" />
+    </svg>
+  );
+}
+export function PlugIcon({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0z" /><path d="M12 17v5" />
+    </svg>
+  );
+}
+export function UserIcon({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
+  );
+}
+export function LogOutIcon({ size = 18 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" />
+    </svg>
+  );
+}
+export function ChevronDoubleIcon({ size = 16, flipped }: IconProps & { flipped?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"
+      style={{ transform: flipped ? "rotate(180deg)" : undefined }}>
+      <path d="m11 17-5-5 5-5" /><path d="m18 17-5-5 5-5" />
+    </svg>
+  );
 }
 AIME_HEREDOC_EOF_9f2c
 

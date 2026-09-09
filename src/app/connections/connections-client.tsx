@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Status = { integrations: { provider: string; status: string; accountLabel?: string }[] };
 
@@ -53,12 +53,7 @@ export default function ConnectionsClient() {
   }
 
   return (
-    <div>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
-      </div>
+    <AppShell>
       <div className="content">
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("connectionsTitle")}</h1>
         <p style={{ color: "var(--text-2)" }}>{t("connectionsLead")}</p>
@@ -138,6 +133,6 @@ export default function ConnectionsClient() {
           </div>
         ))}
       </div>
-    </div>
+    </AppShell>
   );
 }

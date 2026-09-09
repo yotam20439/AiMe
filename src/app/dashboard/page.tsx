@@ -1,14 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useSession, signOut } from "next-auth/react";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Task = {
   id: string; title: string; type: string; source: string; priority: string; status: string;
   category: string; due: string | null; amount: number | null; currency: string | null;
   aiSummary: string | null; why: string | null; sourceRef: string | null; actionUrl: string | null;
-  createdAt: string; user: { name: string };
+  emailDate: string | null; createdAt: string; user: { name: string };
 };
 
 type Attachment = { attachmentId: string; filename: string; mimeType: string; size?: number };
@@ -21,9 +20,9 @@ function daysBetween(a: Date, b: Date) {
   return Math.round((a.getTime() - b.getTime()) / 86400000);
 }
 
-// Priority first, then soonest due date, then oldest-created — so something urgent
-// today outranks something normal next week, and among equals, what's been
-// waiting longest surfaces first rather than getting buried by newer arrivals.
+// Priority first, then soonest due date, then oldest-sent — so something urgent
+// today outranks something normal next week, and among equals, whatever was
+// actually sent longest ago surfaces first rather than getting buried by newer arrivals.
 function smartSort(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
@@ -31,7 +30,9 @@ function smartSort(tasks: Task[]): Task[] {
     const ad = a.due ? new Date(a.due).getTime() : Infinity;
     const bd = b.due ? new Date(b.due).getTime() : Infinity;
     if (ad !== bd) return ad - bd;
-    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    const aSent = new Date(a.emailDate ?? a.createdAt).getTime();
+    const bSent = new Date(b.emailDate ?? b.createdAt).getTime();
+    return aSent - bSent;
   });
 }
 
@@ -44,7 +45,10 @@ function urgencyBadge(t: Task, tt: (k: any) => string): { label: string; tone: "
     if (diff === 0) return { label: tt("dueToday"), tone: "red" };
     if (diff === 1) return { label: tt("dueTomorrow"), tone: "amber" };
   }
-  if (daysBetween(now, new Date(t.createdAt)) >= STALE_DAYS) {
+  // Staleness is measured from when the email was actually sent, not from when AiMe
+  // happened to find it — an old bill that just got scraped is still old.
+  const sentAt = new Date(t.emailDate ?? t.createdAt);
+  if (daysBetween(now, sentAt) >= STALE_DAYS) {
     return { label: tt("sittingAWhile"), tone: "amber" };
   }
   return null;
@@ -62,7 +66,6 @@ function attachmentUrl(messageId: string, a: Attachment) {
 }
 
 export default function Dashboard() {
-  const { data: session } = useSession();
   const { t } = useLang();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,16 +118,7 @@ export default function Dashboard() {
   const done = tasks.filter((tk) => tk.status === "completed");
 
   return (
-    <div>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <span style={{ color: "var(--text-2)", fontSize: 13 }}>{session?.user?.name}</span>
-        <div style={{ flex: 1 }} />
-        <Link className="btn" style={{ width: "auto" }} href="/chat">{t("chat")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/household">{t("account")}</Link>
-        <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>{t("signOut")}</button>
-      </div>
+    <AppShell>
       <div className="content" style={{ maxWidth: 1080 }}>
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
         {notice && <div className="error">{notice}</div>}
@@ -186,6 +180,7 @@ export default function Dashboard() {
                         <dt>Category</dt><dd>{tk.category}</dd>
                         <dt>Priority</dt><dd>{tk.priority}</dd>
                         {tk.due && <><dt>Due</dt><dd>{new Date(tk.due).toLocaleDateString()}</dd></>}
+                        {tk.emailDate && <><dt>Sent</dt><dd>{new Date(tk.emailDate).toLocaleString()}</dd></>}
                         <dt>Detected</dt><dd>{new Date(tk.createdAt).toLocaleString()}</dd>
                         <dt>Source</dt><dd>{tk.source}</dd>
                         {tk.why && <><dt>Why</dt><dd>{tk.why}</dd></>}
@@ -226,6 +221,6 @@ export default function Dashboard() {
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

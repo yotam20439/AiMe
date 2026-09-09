@@ -59,6 +59,7 @@ export async function GET(req: Request) {
             currency: extracted.currency ?? null,
             due: extracted.dueDate ? new Date(extracted.dueDate) : null,
             actionUrl: extracted.actionUrl ?? null,
+            emailDate: msg.date && !isNaN(new Date(msg.date).getTime()) ? new Date(msg.date) : null,
             aiSummary: extracted.whySummary || null,
             why: `Found in an email from ${msg.from}, subject "${msg.subject}".`,
           },

@@ -14,11 +14,12 @@ const REFRESH_PROMPT =
 export default function FloatingChat() {
   const { status } = useSession();
   const pathname = usePathname();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const { messages, sending, error, send } = useAssistantChat(open);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const sideKey = lang === "he" ? "left" : "right";
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -40,7 +41,7 @@ export default function FloatingChat() {
         onClick={() => setOpen((o) => !o)}
         aria-label={open ? "Close AiMe chat" : "Open AiMe chat"}
         style={{
-          position: "fixed", bottom: 20, right: 20, width: 52, height: 52, borderRadius: "50%",
+          position: "fixed", bottom: 20, [sideKey]: 20, width: 52, height: 52, borderRadius: "50%",
           background: "var(--accent)", color: "#fff", border: "none", cursor: "pointer",
           boxShadow: "0 8px 24px rgba(0,0,0,.25)", zIndex: 200, display: "grid", placeItems: "center",
           fontSize: 22, lineHeight: 1,
@@ -52,7 +53,7 @@ export default function FloatingChat() {
       {open && (
         <div
           style={{
-            position: "fixed", bottom: 84, right: 20, width: 340, maxWidth: "calc(100vw - 24px)",
+            position: "fixed", bottom: 84, [sideKey]: 20, width: 340, maxWidth: "calc(100vw - 24px)",
             height: 460, maxHeight: "calc(100vh - 120px)", background: "var(--surface)",
             border: "1px solid var(--border)", borderRadius: 14, boxShadow: "0 20px 50px rgba(0,0,0,.28)",
             zIndex: 199, display: "flex", flexDirection: "column", overflow: "hidden",

@@ -82,6 +82,7 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
         amount: { type: "string", description: "Amount as a plain number string, if this is a bill. Omit otherwise." },
         currency: { type: "string", description: "e.g. ILS or USD. Omit if not a bill." },
         dueDate: { type: "string", description: "ISO date (YYYY-MM-DD) if known. Omit otherwise." },
+        emailDate: { type: "string", description: "The date the source email was actually sent (from get_email_details or search_gmail), as an ISO date. Omit if unknown." },
         actionUrl: { type: "string", description: "A real payment/action link from get_email_details, if one exists. Never invent one." },
         why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
         sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
@@ -190,6 +191,8 @@ export function makeToolExecutor(userId: string) {
 
         const dueRaw = args.dueDate ? new Date(String(args.dueDate)) : null;
         const due = dueRaw && !isNaN(dueRaw.getTime()) ? dueRaw : null;
+        const emailDateRaw = args.emailDate ? new Date(String(args.emailDate)) : null;
+        const emailDate = emailDateRaw && !isNaN(emailDateRaw.getTime()) ? emailDateRaw : null;
 
         // Only accept an actionUrl that's a real, well-formed http(s) link — cheap guard
         // against a malformed or invented value slipping through.
@@ -211,6 +214,7 @@ export function makeToolExecutor(userId: string) {
             currency: args.currency ? String(args.currency) : null,
             due,
             actionUrl,
+            emailDate,
             why: args.why ? String(args.why) : null,
             aiSummary: args.why ? String(args.why) : null,
           },
@@ -251,8 +255,8 @@ there's nothing there.
 
 For a bill, call get_email_details on it first to read the real body and find any payment link — only ever use a link
 that tool actually returns, never invent or guess one. Then call search_tasks to make sure it isn't already tracked, then
-create_task, passing the Gmail message's id as sourceRef and the real link as actionUrl if you found one. This mirrors
-what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
+create_task, passing the Gmail message's id as sourceRef, the email's actual sent date (from get_email_details or the
+search result) as emailDate, and the real link as actionUrl if you found one. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
 permission.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of

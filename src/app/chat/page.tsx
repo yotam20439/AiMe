@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useLang } from "@/lib/i18n";
+import AppShell from "@/components/AppShell";
 
 type Message = { id: string; role: "user" | "model"; content: string };
 
@@ -51,21 +51,19 @@ export default function ChatPage() {
     "just one broad search, and add anything actionable you find as a task. Then summarize what you found and what you added.";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      <div className="topbar">
-        <span className="brand"><img src="/logo-mark.png" alt="" /><b>AiMe</b></span>
-        <div style={{ flex: 1 }} />
-        <button
-          className="btn"
-          style={{ width: "auto" }}
-          disabled={sending}
-          onClick={(e) => send(e as any, REFRESH_PROMPT)}
-        >
-          🔄 {t("checkNow")}
-        </button>
-        <Link className="btn" style={{ width: "auto" }} href="/connections">{t("connections")}</Link>
-        <Link className="btn" style={{ width: "auto" }} href="/dashboard">{t("today")}</Link>
-      </div>
+    <AppShell>
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        <div className="topbar">
+          <div style={{ flex: 1 }} />
+          <button
+            className="btn"
+            style={{ width: "auto" }}
+            disabled={sending}
+            onClick={(e) => send(e as any, REFRESH_PROMPT)}
+          >
+            🔄 {t("checkNow")}
+          </button>
+        </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "20px 16px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -113,6 +111,7 @@ export default function ChatPage() {
         />
         <button className="btn primary" style={{ width: "auto" }} disabled={sending}>{t("send")}</button>
       </form>
-    </div>
+      </div>
+    </AppShell>
   );
 }
