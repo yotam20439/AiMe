@@ -16,21 +16,31 @@ export async function GET(req: Request) {
   });
 
   let created = 0;
+  let matchedCount = 0;
+  let notActionableCount = 0;
+  let alreadyTrackedCount = 0;
+  const notActionableSample: { subject: string; from: string }[] = [];
+
   for (const integration of integrations) {
     try {
       const gmail = await getGmailClient(integration);
       const messages = await listCandidateMessages(gmail);
+      matchedCount += messages.length;
 
       for (const msg of messages) {
         // Already turned into a task on a previous run — skip without spending an AI call.
         const existing = await prisma.task.findUnique({
           where: { userId_sourceRef: { userId: integration.userId, sourceRef: msg.id } },
         });
-        if (existing) continue;
+        if (existing) { alreadyTrackedCount++; continue; }
 
         const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.snippet}`;
         const extracted = await extractTask("Gmail", text);
-        if (!extracted?.isActionable) continue;
+        if (!extracted?.isActionable) {
+          notActionableCount++;
+          if (notActionableSample.length < 5) notActionableSample.push({ subject: msg.subject, from: msg.from });
+          continue;
+        }
 
         const user = await prisma.user.findUnique({ where: { id: integration.userId } });
         if (!user) continue;
@@ -65,5 +75,13 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, checked: integrations.length, tasksCreated: created });
+  return NextResponse.json({
+    ok: true,
+    checked: integrations.length,
+    candidateMessagesMatched: matchedCount,
+    alreadyTracked: alreadyTrackedCount,
+    judgedNotActionable: notActionableCount,
+    tasksCreated: created,
+    notActionableSample, // subjects the AI looked at but decided weren't worth a task — useful for tuning
+  });
 }
