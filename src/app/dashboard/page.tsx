@@ -11,6 +11,8 @@ type Task = {
   createdAt: string; user: { name: string };
 };
 
+type Attachment = { attachmentId: string; filename: string; mimeType: string; size?: number };
+
 const TYPE_ICON: Record<string, string> = { bill: "💳", appointment: "📅", document: "📄", message: "💬", task: "✅" };
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 const STALE_DAYS = 5;
@@ -52,12 +54,21 @@ function gmailLink(sourceRef: string) {
   return `https://mail.google.com/mail/u/0/#all/${sourceRef}`;
 }
 
+function attachmentUrl(messageId: string, a: Attachment) {
+  const params = new URLSearchParams({
+    messageId, attachmentId: a.attachmentId, filename: a.filename, mimeType: a.mimeType,
+  });
+  return `/api/gmail/attachment?${params.toString()}`;
+}
+
 export default function Dashboard() {
   const { data: session } = useSession();
   const { t } = useLang();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Record<string, Attachment[] | "loading">>({});
 
   async function load() {
     setLoading(true);
@@ -68,6 +79,17 @@ export default function Dashboard() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function toggleExpand(tk: Task) {
+    const next = expanded === tk.id ? null : tk.id;
+    setExpanded(next);
+    if (next && tk.source === "gmail" && !attachments[tk.id]) {
+      setAttachments((a) => ({ ...a, [tk.id]: "loading" }));
+      const res = await fetch(`/api/tasks/${tk.id}/attachments`);
+      const data = await res.json().catch(() => ({ attachments: [] }));
+      setAttachments((a) => ({ ...a, [tk.id]: data.attachments ?? [] }));
+    }
+  }
 
   async function complete(id: string) {
     await fetch("/api/tasks", {
@@ -118,6 +140,8 @@ export default function Dashboard() {
           <div className="grid2">
             {open.map((tk) => {
               const badge = urgencyBadge(tk, t);
+              const isOpen = expanded === tk.id;
+              const atts = attachments[tk.id];
               return (
                 <div className={`tcard${tk.priority === "urgent" ? " urgent" : ""}`} key={tk.id}>
                   <div className="top">
@@ -139,18 +163,52 @@ export default function Dashboard() {
                   {(tk.aiSummary || tk.why) && <p className="why">{tk.aiSummary ?? tk.why}</p>}
 
                   <div className="foot">
-                    {tk.actionUrl ? (
+                    {tk.actionUrl && (
                       <a className="btn primary" style={{ width: "auto" }} href={tk.actionUrl} target="_blank" rel="noreferrer">
                         {tk.type === "bill" ? "Pay now" : t("openEmail")}
                       </a>
-                    ) : tk.source === "gmail" && tk.sourceRef ? (
+                    )}
+                    {tk.source === "gmail" && tk.sourceRef && (
                       <a className="btn" style={{ width: "auto" }} href={gmailLink(tk.sourceRef)} target="_blank" rel="noreferrer">
                         {t("openEmail")}
                       </a>
-                    ) : null}
+                    )}
                     <button className="btn" style={{ width: "auto" }} onClick={() => complete(tk.id)}>{t("complete")}</button>
                     <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(tk.id)}>{t("dismiss")}</button>
+                    <button className="tcard-toggle" onClick={() => toggleExpand(tk)}>
+                      {isOpen ? "▲ Less" : "▼ Details"}
+                    </button>
                   </div>
+
+                  {isOpen && (
+                    <div className="tcard-details">
+                      <dl>
+                        <dt>Category</dt><dd>{tk.category}</dd>
+                        <dt>Priority</dt><dd>{tk.priority}</dd>
+                        {tk.due && <><dt>Due</dt><dd>{new Date(tk.due).toLocaleDateString()}</dd></>}
+                        <dt>Detected</dt><dd>{new Date(tk.createdAt).toLocaleString()}</dd>
+                        <dt>Source</dt><dd>{tk.source}</dd>
+                        {tk.why && <><dt>Why</dt><dd>{tk.why}</dd></>}
+                      </dl>
+                      {tk.source === "gmail" && tk.sourceRef && (
+                        <div>
+                          {atts === "loading" && <p style={{ fontSize: 12.5, color: "var(--text-2)", margin: 0 }}>Checking for attachments…</p>}
+                          {Array.isArray(atts) && atts.length === 0 && (
+                            <p style={{ fontSize: 12.5, color: "var(--text-2)", margin: 0 }}>No attachments on this email.</p>
+                          )}
+                          {Array.isArray(atts) && atts.length > 0 && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {atts.map((a) => (
+                                <a key={a.attachmentId} className="attach-item" href={attachmentUrl(tk.sourceRef as string, a)} target="_blank" rel="noreferrer">
+                                  📎 <span>{a.filename}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

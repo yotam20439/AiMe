@@ -104,6 +104,33 @@ export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
   return messages;
 }
 
+function collectAttachments(
+  payload: any,
+  out: { attachmentId: string; filename: string; mimeType: string; size?: number }[] = []
+) {
+  if (!payload) return out;
+  if (payload.filename && payload.body?.attachmentId) {
+    out.push({
+      attachmentId: payload.body.attachmentId,
+      filename: payload.filename,
+      mimeType: payload.mimeType || "application/octet-stream",
+      size: payload.body.size,
+    });
+  }
+  for (const p of payload.parts || []) collectAttachments(p, out);
+  return out;
+}
+
+export async function listAttachments(gmail: gmail_v1.Gmail, messageId: string) {
+  const full = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
+  return collectAttachments(full.data.payload);
+}
+
+export async function getAttachmentBytes(gmail: gmail_v1.Gmail, messageId: string, attachmentId: string): Promise<Buffer> {
+  const res = await gmail.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId });
+  return Buffer.from((res.data.data || "").replace(/-/g, "+").replace(/_/g, "/"), "base64");
+}
+
 export async function getMessageDetails(gmail: gmail_v1.Gmail, messageId: string) {
   const full = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
   const headers = full.data.payload?.headers ?? [];

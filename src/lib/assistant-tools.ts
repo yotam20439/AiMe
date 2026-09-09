@@ -178,10 +178,12 @@ export function makeToolExecutor(userId: string) {
         const title = String(args.title || "").trim().slice(0, 200);
         if (!title) return { error: "title is required" };
 
-        // Reuse the exact same sourceRef the background Gmail sync would use for this
-        // message, so whichever path (chat or cron) gets there first, the other skips
-        // it instead of creating a second task for the same email.
-        const sourceRef = args.sourceRef ? String(args.sourceRef) : `chat:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+        // If a real Gmail message id was provided, tag the source as gmail so the
+        // dashboard's "open email" link actually works — only fall back to a
+        // synthetic chat-only key when we truly don't have one.
+        const providedRef = args.sourceRef ? String(args.sourceRef) : null;
+        const sourceRef = providedRef || `chat:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+        const source = providedRef ? "gmail" : "chat";
 
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) return { error: "User not found" };
@@ -200,7 +202,7 @@ export function makeToolExecutor(userId: string) {
             userId,
             householdId: user.householdId,
             sourceRef,
-            source: "chat",
+            source,
             title,
             type: (args.type as string) || "task",
             category: (args.category as string) || "personal",

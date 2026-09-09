@@ -3427,6 +3427,51 @@ export async function GET(req: Request) {
 }
 AIME_HEREDOC_EOF_9f2c
 
+mkdir -p "src/app/api/gmail/attachment"
+cat > "src/app/api/gmail/attachment/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { getGmailClient, getAttachmentBytes } from "@/lib/gmail";
+
+export async function GET(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  const userId = (session.user as any).id;
+
+  const { searchParams } = new URL(req.url);
+  const messageId = searchParams.get("messageId");
+  const attachmentId = searchParams.get("attachmentId");
+  const filename = (searchParams.get("filename") || "attachment").replace(/["\r\n]/g, "");
+  const mimeType = searchParams.get("mimeType") || "application/octet-stream";
+
+  if (!messageId || !attachmentId) {
+    return NextResponse.json({ error: "messageId and attachmentId are required" }, { status: 400 });
+  }
+
+  const integration = await prisma.integration.findUnique({
+    where: { userId_provider: { userId, provider: "google" } },
+  });
+  if (!integration) return NextResponse.json({ error: "Google isn't connected" }, { status: 400 });
+
+  try {
+    const gmail = await getGmailClient(integration);
+    const bytes = await getAttachmentBytes(gmail, messageId, attachmentId);
+    return new NextResponse(bytes, {
+      headers: {
+        "content-type": mimeType,
+        "content-disposition": `inline; filename="${filename}"`,
+        "content-length": String(bytes.length),
+      },
+    });
+  } catch (err) {
+    console.error("Failed to fetch attachment:", err);
+    return NextResponse.json({ error: "Couldn't fetch the attachment — try reconnecting Google." }, { status: 500 });
+  }
+}
+AIME_HEREDOC_EOF_9f2c
+
 mkdir -p "src/app/api/household"
 cat > "src/app/api/household/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { NextResponse } from "next/server";
@@ -3933,6 +3978,39 @@ export async function POST(req: Request) {
     data: { name, email: normalizedEmail, passwordHash, householdId: household.id, role: "owner" },
   });
   return NextResponse.json({ ok: true, userId: user.id, inviteCode: household.inviteCode });
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/app/api/tasks/[id]/attachments"
+cat > "src/app/api/tasks/[id]/attachments/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { getGmailClient, listAttachments } from "@/lib/gmail";
+
+export async function GET(_req: Request, { params }: { params: { id: string } }) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  const userId = (session.user as any).id;
+
+  const task = await prisma.task.findUnique({ where: { id: params.id } });
+  if (!task || task.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (task.source !== "gmail" || !task.sourceRef) return NextResponse.json({ attachments: [] });
+
+  const integration = await prisma.integration.findUnique({
+    where: { userId_provider: { userId, provider: "google" } },
+  });
+  if (!integration) return NextResponse.json({ attachments: [] });
+
+  try {
+    const gmail = await getGmailClient(integration);
+    const attachments = await listAttachments(gmail, task.sourceRef);
+    return NextResponse.json({ attachments });
+  } catch (err) {
+    console.error("Failed to list attachments:", err);
+    return NextResponse.json({ attachments: [] });
+  }
 }
 AIME_HEREDOC_EOF_9f2c
 
@@ -4600,6 +4678,8 @@ type Task = {
   createdAt: string; user: { name: string };
 };
 
+type Attachment = { attachmentId: string; filename: string; mimeType: string; size?: number };
+
 const TYPE_ICON: Record<string, string> = { bill: "💳", appointment: "📅", document: "📄", message: "💬", task: "✅" };
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 const STALE_DAYS = 5;
@@ -4641,12 +4721,21 @@ function gmailLink(sourceRef: string) {
   return `https://mail.google.com/mail/u/0/#all/${sourceRef}`;
 }
 
+function attachmentUrl(messageId: string, a: Attachment) {
+  const params = new URLSearchParams({
+    messageId, attachmentId: a.attachmentId, filename: a.filename, mimeType: a.mimeType,
+  });
+  return `/api/gmail/attachment?${params.toString()}`;
+}
+
 export default function Dashboard() {
   const { data: session } = useSession();
   const { t } = useLang();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Record<string, Attachment[] | "loading">>({});
 
   async function load() {
     setLoading(true);
@@ -4657,6 +4746,17 @@ export default function Dashboard() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function toggleExpand(tk: Task) {
+    const next = expanded === tk.id ? null : tk.id;
+    setExpanded(next);
+    if (next && tk.source === "gmail" && !attachments[tk.id]) {
+      setAttachments((a) => ({ ...a, [tk.id]: "loading" }));
+      const res = await fetch(`/api/tasks/${tk.id}/attachments`);
+      const data = await res.json().catch(() => ({ attachments: [] }));
+      setAttachments((a) => ({ ...a, [tk.id]: data.attachments ?? [] }));
+    }
+  }
 
   async function complete(id: string) {
     await fetch("/api/tasks", {
@@ -4707,6 +4807,8 @@ export default function Dashboard() {
           <div className="grid2">
             {open.map((tk) => {
               const badge = urgencyBadge(tk, t);
+              const isOpen = expanded === tk.id;
+              const atts = attachments[tk.id];
               return (
                 <div className={`tcard${tk.priority === "urgent" ? " urgent" : ""}`} key={tk.id}>
                   <div className="top">
@@ -4728,18 +4830,52 @@ export default function Dashboard() {
                   {(tk.aiSummary || tk.why) && <p className="why">{tk.aiSummary ?? tk.why}</p>}
 
                   <div className="foot">
-                    {tk.actionUrl ? (
+                    {tk.actionUrl && (
                       <a className="btn primary" style={{ width: "auto" }} href={tk.actionUrl} target="_blank" rel="noreferrer">
                         {tk.type === "bill" ? "Pay now" : t("openEmail")}
                       </a>
-                    ) : tk.source === "gmail" && tk.sourceRef ? (
+                    )}
+                    {tk.source === "gmail" && tk.sourceRef && (
                       <a className="btn" style={{ width: "auto" }} href={gmailLink(tk.sourceRef)} target="_blank" rel="noreferrer">
                         {t("openEmail")}
                       </a>
-                    ) : null}
+                    )}
                     <button className="btn" style={{ width: "auto" }} onClick={() => complete(tk.id)}>{t("complete")}</button>
                     <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(tk.id)}>{t("dismiss")}</button>
+                    <button className="tcard-toggle" onClick={() => toggleExpand(tk)}>
+                      {isOpen ? "▲ Less" : "▼ Details"}
+                    </button>
                   </div>
+
+                  {isOpen && (
+                    <div className="tcard-details">
+                      <dl>
+                        <dt>Category</dt><dd>{tk.category}</dd>
+                        <dt>Priority</dt><dd>{tk.priority}</dd>
+                        {tk.due && <><dt>Due</dt><dd>{new Date(tk.due).toLocaleDateString()}</dd></>}
+                        <dt>Detected</dt><dd>{new Date(tk.createdAt).toLocaleString()}</dd>
+                        <dt>Source</dt><dd>{tk.source}</dd>
+                        {tk.why && <><dt>Why</dt><dd>{tk.why}</dd></>}
+                      </dl>
+                      {tk.source === "gmail" && tk.sourceRef && (
+                        <div>
+                          {atts === "loading" && <p style={{ fontSize: 12.5, color: "var(--text-2)", margin: 0 }}>Checking for attachments…</p>}
+                          {Array.isArray(atts) && atts.length === 0 && (
+                            <p style={{ fontSize: 12.5, color: "var(--text-2)", margin: 0 }}>No attachments on this email.</p>
+                          )}
+                          {Array.isArray(atts) && atts.length > 0 && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {atts.map((a) => (
+                                <a key={a.attachmentId} className="attach-item" href={attachmentUrl(tk.sourceRef as string, a)} target="_blank" rel="noreferrer">
+                                  📎 <span>{a.filename}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -5402,6 +5538,14 @@ html[dir="rtl"] .tcard .why{padding-left:0;border-left:none;padding-right:10px;b
 .pri.normal{background:var(--accent)} .pri.low{background:var(--text-3)}
 .pill.red{background:var(--red-weak);color:var(--red)}
 .pill.amber{background:var(--amber-weak);color:var(--amber)}
+.tcard-toggle{background:none;border:none;color:var(--text-2);font-size:12px;cursor:pointer;margin-left:auto;padding:4px 2px}
+html[dir="rtl"] .tcard-toggle{margin-left:0;margin-right:auto}
+.tcard-details{border-top:1px solid var(--border);margin-top:2px;padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.tcard-details dl{display:grid;grid-template-columns:88px 1fr;gap:5px 10px;font-size:12.5px;margin:0}
+.tcard-details dt{color:var(--text-3)}
+.tcard-details dd{margin:0;color:var(--text)}
+.attach-item{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:12.5px}
+.attach-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/app/household"
@@ -6173,10 +6317,12 @@ export function makeToolExecutor(userId: string) {
         const title = String(args.title || "").trim().slice(0, 200);
         if (!title) return { error: "title is required" };
 
-        // Reuse the exact same sourceRef the background Gmail sync would use for this
-        // message, so whichever path (chat or cron) gets there first, the other skips
-        // it instead of creating a second task for the same email.
-        const sourceRef = args.sourceRef ? String(args.sourceRef) : `chat:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+        // If a real Gmail message id was provided, tag the source as gmail so the
+        // dashboard's "open email" link actually works — only fall back to a
+        // synthetic chat-only key when we truly don't have one.
+        const providedRef = args.sourceRef ? String(args.sourceRef) : null;
+        const sourceRef = providedRef || `chat:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+        const source = providedRef ? "gmail" : "chat";
 
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) return { error: "User not found" };
@@ -6195,7 +6341,7 @@ export function makeToolExecutor(userId: string) {
             userId,
             householdId: user.householdId,
             sourceRef,
-            source: "chat",
+            source,
             title,
             type: (args.type as string) || "task",
             category: (args.category as string) || "personal",
@@ -6652,6 +6798,33 @@ export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
     })
   );
   return messages;
+}
+
+function collectAttachments(
+  payload: any,
+  out: { attachmentId: string; filename: string; mimeType: string; size?: number }[] = []
+) {
+  if (!payload) return out;
+  if (payload.filename && payload.body?.attachmentId) {
+    out.push({
+      attachmentId: payload.body.attachmentId,
+      filename: payload.filename,
+      mimeType: payload.mimeType || "application/octet-stream",
+      size: payload.body.size,
+    });
+  }
+  for (const p of payload.parts || []) collectAttachments(p, out);
+  return out;
+}
+
+export async function listAttachments(gmail: gmail_v1.Gmail, messageId: string) {
+  const full = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
+  return collectAttachments(full.data.payload);
+}
+
+export async function getAttachmentBytes(gmail: gmail_v1.Gmail, messageId: string, attachmentId: string): Promise<Buffer> {
+  const res = await gmail.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId });
+  return Buffer.from((res.data.data || "").replace(/-/g, "+").replace(/_/g, "/"), "base64");
 }
 
 export async function getMessageDetails(gmail: gmail_v1.Gmail, messageId: string) {
