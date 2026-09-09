@@ -37,13 +37,41 @@ export async function getCalendarClient(integration: Integration) {
   return google.calendar({ version: "v3", auth: oauth2Client });
 }
 
-// A narrow, cheap-to-run keyword prefilter so we only spend an AI call on
-// messages that plausibly contain a bill, appointment, or deadline — not on
-// every newsletter in the inbox.
+// Narrowed on purpose for now, per explicit request: bills/payments and important
+// messages only — not appointments, invitations, birthdays, or generic reminders.
 const CANDIDATE_QUERY =
-  '(bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
-  'invite OR invitation OR RSVP OR reminder OR ' +
-  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה)';
+  '(bill OR invoice OR payment OR due OR receipt OR "sign" OR deadline OR ' +
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR קבלה OR חתימה OR "מועד אחרון")';
+
+function decodeBase64Url(data?: string | null): string {
+  if (!data) return "";
+  return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8");
+}
+
+// Walks a Gmail MIME payload to find readable body text, preferring plain text
+// over HTML since HTML markup just adds noise for both link-extraction and the AI.
+function extractBodyText(payload: any): string {
+  if (!payload) return "";
+  if (payload.body?.data) return decodeBase64Url(payload.body.data);
+  const parts: any[] = payload.parts || [];
+  const plain = parts.find((p) => p.mimeType === "text/plain");
+  if (plain?.body?.data) return decodeBase64Url(plain.body.data);
+  const html = parts.find((p) => p.mimeType === "text/html");
+  if (html?.body?.data) return decodeBase64Url(html.body.data);
+  for (const p of parts) {
+    const nested = extractBodyText(p);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+// Pulls real URLs out of the body so the AI only ever picks from links that
+// genuinely exist in the email, rather than inventing one.
+export function extractLinks(bodyText: string, max = 10): string[] {
+  const matches = bodyText.match(/https?:\/\/[^\s"'<>\)]+/g) ?? [];
+  const cleaned = matches.map((u) => u.replace(/[.,;]+$/, ""));
+  return Array.from(new Set(cleaned)).slice(0, max);
+}
 
 export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
   const list = await gmail.users.messages.list({
@@ -57,21 +85,37 @@ export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
       const full = await gmail.users.messages.get({
         userId: "me",
         id: m.id!,
-        format: "metadata",
-        metadataHeaders: ["Subject", "From", "Date"],
+        format: "full",
       });
       const headers = full.data.payload?.headers ?? [];
       const get = (name: string) => headers.find((h) => h.name === name)?.value ?? "";
+      const bodyText = extractBodyText(full.data.payload);
       return {
         id: m.id!,
         subject: get("Subject"),
         from: get("From"),
         date: get("Date"),
         snippet: full.data.snippet ?? "",
+        bodyText: bodyText.replace(/\r/g, "").slice(0, 4000),
+        links: extractLinks(bodyText),
       };
     })
   );
   return messages;
+}
+
+export async function getMessageDetails(gmail: gmail_v1.Gmail, messageId: string) {
+  const full = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
+  const headers = full.data.payload?.headers ?? [];
+  const get = (name: string) => headers.find((h) => h.name === name)?.value ?? "";
+  const bodyText = extractBodyText(full.data.payload);
+  return {
+    subject: get("Subject"),
+    from: get("From"),
+    date: get("Date"),
+    bodyText: bodyText.replace(/\r/g, "").slice(0, 4000),
+    links: extractLinks(bodyText),
+  };
 }
 
 // The label a dismissed task's source email gets moved into. Gmail doesn't have real

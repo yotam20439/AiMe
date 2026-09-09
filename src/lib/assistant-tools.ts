@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { getGmailClient, getCalendarClient } from "./gmail";
+import { getGmailClient, getCalendarClient, getMessageDetails } from "./gmail";
 import type { ToolDeclaration } from "./gemini";
 
 // Every executor here is scoped to a single userId and is read-only — nothing in this
@@ -51,22 +51,38 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
     },
   },
   {
+    name: "get_email_details",
+    description:
+      "Get the full body and any real links found in one specific email, by its Gmail message id (from a " +
+      "search_gmail result). Use this on a bill before create_task, to find the actual payment link — never " +
+      "invent a URL, only ever use one returned by this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageId: { type: "string", description: "The Gmail message id, from search_gmail results." },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
     name: "create_task",
     description:
-      "Add something actionable you found (a bill, an appointment to confirm, a document to sign) to the person's " +
-      "Today list, the same way AiMe's automatic background check already does. Check search_tasks first so you " +
-      "don't create a duplicate of something already tracked. If this came from a specific Gmail message, pass its " +
-      "id as sourceRef so it lines up with the background sync and never gets created twice.",
+      "Add a bill or an important message to the person's Today list, the same way AiMe's automatic background " +
+      "check already does. Check search_tasks first so you don't create a duplicate of something already tracked. " +
+      "If this came from a specific Gmail message, pass its id as sourceRef so it lines up with the background " +
+      "sync and never gets created twice. For bills, call get_email_details first and pass the real payment link " +
+      "as actionUrl if one exists.",
     parameters: {
       type: "object",
       properties: {
         title: { type: "string", description: "Short task title." },
-        type: { type: "string", enum: ["bill", "message", "document", "appointment", "task"] },
-        category: { type: "string", enum: ["personal", "work", "finance", "appointments", "purchases"] },
+        type: { type: "string", enum: ["bill", "message", "document", "task"] },
+        category: { type: "string", enum: ["personal", "work", "finance", "purchases"] },
         priority: { type: "string", enum: ["urgent", "high", "normal", "low"] },
         amount: { type: "string", description: "Amount as a plain number string, if this is a bill. Omit otherwise." },
         currency: { type: "string", description: "e.g. ILS or USD. Omit if not a bill." },
         dueDate: { type: "string", description: "ISO date (YYYY-MM-DD) if known. Omit otherwise." },
+        actionUrl: { type: "string", description: "A real payment/action link from get_email_details, if one exists. Never invent one." },
         why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
         sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
       },
@@ -147,6 +163,17 @@ export function makeToolExecutor(userId: string) {
         return { count: activity.length, activity: activity.map((a) => ({ text: a.text, kind: a.kind, when: a.createdAt })) };
       }
 
+      case "get_email_details": {
+        const integration = await prisma.integration.findUnique({ where: { userId_provider: { userId, provider: "google" } } });
+        if (!integration || integration.status !== "connected") {
+          return { error: "Gmail isn't connected for this person yet." };
+        }
+        const messageId = String(args.messageId || "");
+        if (!messageId) return { error: "messageId is required" };
+        const gmail = await getGmailClient(integration);
+        return getMessageDetails(gmail, messageId);
+      }
+
       case "create_task": {
         const title = String(args.title || "").trim().slice(0, 200);
         if (!title) return { error: "title is required" };
@@ -162,6 +189,11 @@ export function makeToolExecutor(userId: string) {
         const dueRaw = args.dueDate ? new Date(String(args.dueDate)) : null;
         const due = dueRaw && !isNaN(dueRaw.getTime()) ? dueRaw : null;
 
+        // Only accept an actionUrl that's a real, well-formed http(s) link — cheap guard
+        // against a malformed or invented value slipping through.
+        const rawUrl = args.actionUrl ? String(args.actionUrl) : null;
+        const actionUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : null;
+
         const task = await prisma.task.upsert({
           where: { userId_sourceRef: { userId, sourceRef } },
           create: {
@@ -176,6 +208,7 @@ export function makeToolExecutor(userId: string) {
             amount: args.amount ? Number(args.amount) : null,
             currency: args.currency ? String(args.currency) : null,
             due,
+            actionUrl,
             why: args.why ? String(args.why) : null,
             aiSummary: args.why ? String(args.why) : null,
           },
@@ -196,31 +229,29 @@ export function makeToolExecutor(userId: string) {
 }
 
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
-You have tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, see recent automated
-activity, and add a new task. Use a tool whenever the answer depends on their actual data rather than general knowledge —
-don't guess.
+You have tools to look up their AiMe tasks, search their Gmail, get one email's full body and links, list their upcoming
+Calendar events, see recent automated activity, and add a new task. Use a tool whenever the answer depends on their actual
+data rather than general knowledge — don't guess.
 
 Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
 a substitute for checking again right now.
 
-Your job is to help keep their whole life organized, not just bills. That includes: bills and invoices, appointments to
-confirm, documents to sign, invitations or RSVPs with a deadline, reminders they or someone else mentioned, deadlines of
-any kind, and birthdays coming up in the next day or two (as a small reminder task, e.g. "Wish X a happy birthday").
-The only things that should NOT become tasks are pure marketing/promotional email and routine notifications with nothing
-to act on (e.g. a generic "5 new LinkedIn messages" digest). When in doubt about something that looks personally relevant,
-lean toward organizing it rather than skipping it.
+Scope is narrowed on purpose right now: organize bills/payments and important messages only — not appointments,
+invitations, birthdays, or generic reminders, even though those might normally be worth tracking. The only things that
+should never become tasks are pure marketing/promotional email and routine notification digests with nothing to act on.
 
-When asked to check email for anything relevant (bills, invoices, deadlines, invitations), don't rely on a single vague
-search. Gmail search only matches literal words, so run a few searches with concrete terms rather than one broad query —
-for example separate searches for: bill/invoice/payment terms (also try חשבונית, חשבון, תשלום, לתשלום since the inbox may
-be in Hebrew), appointment/confirmation terms (also תור, אישור), and invitation/RSVP terms (also הזמנה). A person saying
-"I have bills in my inbox" and not seeing them means the search missed them, not that they don't exist — search harder
-with more specific and varied terms before concluding there's nothing there.
+When asked to check email for bills, don't rely on a single vague search. Gmail search only matches literal words, so run
+a few searches with concrete terms rather than one broad query — for example bill/invoice/payment/due/receipt in English,
+and חשבונית, חשבון, תשלום, לתשלום, קבלה in Hebrew if the inbox may be in Hebrew. A person saying "I have bills in my
+inbox" and not seeing them means the search missed them, not that they don't exist — search harder before concluding
+there's nothing there.
 
-Call search_tasks first to make sure something isn't already tracked, then call create_task to add it, passing the Gmail
-message's id as sourceRef when you have one. This mirrors what AiMe's automatic background check already does on its own
-schedule, so doing it from chat needs no separate permission.
+For a bill, call get_email_details on it first to read the real body and find any payment link — only ever use a link
+that tool actually returns, never invent or guess one. Then call search_tasks to make sure it isn't already tracked, then
+create_task, passing the Gmail message's id as sourceRef and the real link as actionUrl if you found one. This mirrors
+what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
+permission.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.

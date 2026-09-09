@@ -34,8 +34,8 @@ export async function GET(req: Request) {
         });
         if (existing) { alreadyTrackedCount++; continue; }
 
-        const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.snippet}`;
-        const extracted = await extractTask("Gmail", text);
+        const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.bodyText || msg.snippet}`;
+        const extracted = await extractTask("Gmail", text, msg.links);
         if (!extracted?.isActionable) {
           notActionableCount++;
           if (notActionableSample.length < 5) notActionableSample.push({ subject: msg.subject, from: msg.from });
@@ -58,6 +58,7 @@ export async function GET(req: Request) {
             amount: extracted.amount ?? null,
             currency: extracted.currency ?? null,
             due: extracted.dueDate ? new Date(extracted.dueDate) : null,
+            actionUrl: extracted.actionUrl ?? null,
             aiSummary: extracted.whySummary || null,
             why: `Found in an email from ${msg.from}, subject "${msg.subject}".`,
           },

@@ -79,6 +79,9 @@ model Task {
   currency  String?
   aiSummary String?
   why       String?
+  // A real link pulled from the source email's body (e.g. a payment page) — never
+  // invented by the AI, only ever a URL that actually appeared in the message.
+  actionUrl String?
 
   // De-dupe key: e.g. a Gmail message id or "telegram:<chatId>:<messageId>".
   // Prevents the same email being turned into two tasks on the next sync.

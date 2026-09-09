@@ -35,6 +35,13 @@ const DICT = {
   loading: { en: "Loading…", he: "טוען…" },
   complete: { en: "Complete", he: "בוצע" },
   completed: { en: "Completed", he: "הושלם" },
+  dismiss: { en: "Dismiss", he: "התעלם" },
+  openEmail: { en: "Open email", he: "פתח מייל" },
+  overdue: { en: "Overdue", he: "באיחור" },
+  dueToday: { en: "Due today", he: "מועד היום" },
+  dueTomorrow: { en: "Due tomorrow", he: "מועד מחר" },
+  sittingAWhile: { en: "Been sitting a while", he: "ממתין כבר זמן מה" },
+  needsAttention: { en: "Needs attention", he: "דורש תשומת לב" },
 } satisfies Record<string, Record<Lang, string>>;
 
 export type DictKey = keyof typeof DICT;

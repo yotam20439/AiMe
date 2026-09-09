@@ -314,6 +314,9 @@ model Task {
   currency  String?
   aiSummary String?
   why       String?
+  // A real link pulled from the source email's body (e.g. a payment page) — never
+  // invented by the AI, only ever a URL that actually appeared in the message.
+  actionUrl String?
 
   // De-dupe key: e.g. a Gmail message id or "telegram:<chatId>:<messageId>".
   // Prevents the same email being turned into two tasks on the next sync.
@@ -3370,8 +3373,8 @@ export async function GET(req: Request) {
         });
         if (existing) { alreadyTrackedCount++; continue; }
 
-        const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.snippet}`;
-        const extracted = await extractTask("Gmail", text);
+        const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.bodyText || msg.snippet}`;
+        const extracted = await extractTask("Gmail", text, msg.links);
         if (!extracted?.isActionable) {
           notActionableCount++;
           if (notActionableSample.length < 5) notActionableSample.push({ subject: msg.subject, from: msg.from });
@@ -3394,6 +3397,7 @@ export async function GET(req: Request) {
             amount: extracted.amount ?? null,
             currency: extracted.currency ?? null,
             due: extracted.dueDate ? new Date(extracted.dueDate) : null,
+            actionUrl: extracted.actionUrl ?? null,
             aiSummary: extracted.whySummary || null,
             why: `Found in an email from ${msg.from}, subject "${msg.subject}".`,
           },
@@ -4591,15 +4595,58 @@ import { useLang } from "@/lib/i18n";
 
 type Task = {
   id: string; title: string; type: string; source: string; priority: string; status: string;
-  due: string | null; amount: number | null; currency: string | null; aiSummary: string | null;
-  user: { name: string };
+  category: string; due: string | null; amount: number | null; currency: string | null;
+  aiSummary: string | null; why: string | null; sourceRef: string | null; actionUrl: string | null;
+  createdAt: string; user: { name: string };
 };
+
+const TYPE_ICON: Record<string, string> = { bill: "💳", appointment: "📅", document: "📄", message: "💬", task: "✅" };
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+const STALE_DAYS = 5;
+
+function daysBetween(a: Date, b: Date) {
+  return Math.round((a.getTime() - b.getTime()) / 86400000);
+}
+
+// Priority first, then soonest due date, then oldest-created — so something urgent
+// today outranks something normal next week, and among equals, what's been
+// waiting longest surfaces first rather than getting buried by newer arrivals.
+function smartSort(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
+    if (pr !== 0) return pr;
+    const ad = a.due ? new Date(a.due).getTime() : Infinity;
+    const bd = b.due ? new Date(b.due).getTime() : Infinity;
+    if (ad !== bd) return ad - bd;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+}
+
+function urgencyBadge(t: Task, tt: (k: any) => string): { label: string; tone: "red" | "amber" } | null {
+  const now = new Date();
+  if (t.due) {
+    const due = new Date(t.due);
+    const diff = daysBetween(new Date(due.toDateString()), new Date(now.toDateString()));
+    if (diff < 0) return { label: tt("overdue"), tone: "red" };
+    if (diff === 0) return { label: tt("dueToday"), tone: "red" };
+    if (diff === 1) return { label: tt("dueTomorrow"), tone: "amber" };
+  }
+  if (daysBetween(now, new Date(t.createdAt)) >= STALE_DAYS) {
+    return { label: tt("sittingAWhile"), tone: "amber" };
+  }
+  return null;
+}
+
+function gmailLink(sourceRef: string) {
+  return `https://mail.google.com/mail/u/0/#all/${sourceRef}`;
+}
 
 export default function Dashboard() {
   const { data: session } = useSession();
   const { t } = useLang();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -4610,8 +4657,6 @@ export default function Dashboard() {
   }
 
   useEffect(() => { load(); }, []);
-
-  const [notice, setNotice] = useState<string | null>(null);
 
   async function complete(id: string) {
     await fetch("/api/tasks", {
@@ -4633,8 +4678,8 @@ export default function Dashboard() {
     load();
   }
 
-  const open = tasks.filter((t) => t.status !== "completed");
-  const done = tasks.filter((t) => t.status === "completed");
+  const open = smartSort(tasks.filter((tk) => tk.status !== "completed"));
+  const done = tasks.filter((tk) => tk.status === "completed");
 
   return (
     <div>
@@ -4647,9 +4692,10 @@ export default function Dashboard() {
         <Link className="btn" style={{ width: "auto" }} href="/household">{t("account")}</Link>
         <button className="btn" style={{ width: "auto" }} onClick={() => signOut({ callbackUrl: "/login" })}>{t("signOut")}</button>
       </div>
-      <div className="content">
+      <div className="content" style={{ maxWidth: 1080 }}>
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
         {notice && <div className="error">{notice}</div>}
+
         {loading ? (
           <p style={{ color: "var(--text-2)" }}>{t("loading")}</p>
         ) : open.length === 0 ? (
@@ -4658,24 +4704,54 @@ export default function Dashboard() {
             endpoint manually while testing.
           </p>
         ) : (
-          open.map((t2) => (
-            <div className="row" key={t2.id}>
-              <div className="t">
-                <b>{t2.title}{t2.amount ? ` · ${t2.currency ?? ""}${t2.amount}` : ""}</b>
-                <small>{t2.aiSummary ?? `${t2.source} · ${t2.priority}`}{t2.due ? ` · Due ${new Date(t2.due).toLocaleDateString()}` : ""}</small>
-              </div>
-              <button className="btn" style={{ width: "auto" }} onClick={() => complete(t2.id)}>{t("complete")}</button>
-              <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(t2.id)}>Dismiss</button>
-            </div>
-          ))
+          <div className="grid2">
+            {open.map((tk) => {
+              const badge = urgencyBadge(tk, t);
+              return (
+                <div className={`tcard${tk.priority === "urgent" ? " urgent" : ""}`} key={tk.id}>
+                  <div className="top">
+                    <span className={`tico ${tk.type}`}>{TYPE_ICON[tk.type] ?? "✅"}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h3>{tk.title}</h3>
+                      <div className="meta">
+                        <span className={`pri ${tk.priority}`} title={tk.priority} />
+                        <span>{tk.source}</span>
+                        {badge && <span className={`pill ${badge.tone}`}>{badge.label}</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {tk.type === "bill" && tk.amount != null && (
+                    <div className="amount">{tk.currency ?? ""}{tk.amount}</div>
+                  )}
+
+                  {(tk.aiSummary || tk.why) && <p className="why">{tk.aiSummary ?? tk.why}</p>}
+
+                  <div className="foot">
+                    {tk.actionUrl ? (
+                      <a className="btn primary" style={{ width: "auto" }} href={tk.actionUrl} target="_blank" rel="noreferrer">
+                        {tk.type === "bill" ? "Pay now" : t("openEmail")}
+                      </a>
+                    ) : tk.source === "gmail" && tk.sourceRef ? (
+                      <a className="btn" style={{ width: "auto" }} href={gmailLink(tk.sourceRef)} target="_blank" rel="noreferrer">
+                        {t("openEmail")}
+                      </a>
+                    ) : null}
+                    <button className="btn" style={{ width: "auto" }} onClick={() => complete(tk.id)}>{t("complete")}</button>
+                    <button className="btn" style={{ width: "auto" }} onClick={() => dismiss(tk.id)}>{t("dismiss")}</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
 
         {done.length > 0 && (
           <>
             <h2 style={{ fontSize: 15, marginTop: 28, color: "var(--text-2)" }}>{t("completed")}</h2>
-            {done.map((t2) => (
-              <div className="row" key={t2.id} style={{ opacity: 0.6 }}>
-                <div className="t"><b style={{ textDecoration: "line-through" }}>{t2.title}</b></div>
+            {done.map((tk) => (
+              <div className="row" key={tk.id} style={{ opacity: 0.6 }}>
+                <div className="t"><b style={{ textDecoration: "line-through" }}>{tk.title}</b></div>
               </div>
             ))}
           </>
@@ -5238,6 +5314,7 @@ cat > "src/app/globals.css" << 'AIME_HEREDOC_EOF_9f2c'
   --text:#23211F; --text-2:#6B6660; --text-3:#9A958E;
   --accent:#0E7C86; --accent-2:#0A616A; --accent-weak:#E2F0F1; --accent-line:#BEDFE1;
   --red:#B03A2C; --red-weak:#FBEAE6; --green:#2C7357; --green-weak:#E3F0E9;
+  --amber:#9C6511; --amber-weak:#FBF0DC;
   --sans:'Alef',ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
@@ -5299,6 +5376,32 @@ html[dir="rtl"] .seg{flex-direction:row-reverse}
 .row .t{flex:1;min-width:0}
 .row .t b{display:block;font-size:14px}
 .row .t small{color:var(--text-2);font-size:12.5px}
+
+/* ---------- task cards ---------- */
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:8px}
+.tcard{
+  background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px 15px;
+  display:flex;flex-direction:column;gap:10px;position:relative;
+}
+.tcard.urgent{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
+.tcard .top{display:flex;gap:10px;align-items:flex-start}
+.tico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;font-size:15px}
+.tico.bill{background:var(--red-weak)}
+.tico.message{background:var(--green-weak)}
+.tico.document{background:var(--accent-weak)}
+.tico.appointment{background:var(--amber-weak)}
+.tico.task{background:var(--surface-2)}
+.tcard h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.tcard .meta{display:flex;align-items:center;gap:7px;margin-top:3px;flex-wrap:wrap;font-size:11.5px;color:var(--text-3)}
+.tcard .why{font-size:12.8px;color:var(--text-2);margin:0;padding-left:10px;border-left:2px solid var(--border)}
+html[dir="rtl"] .tcard .why{padding-left:0;border-left:none;padding-right:10px;border-right:2px solid var(--border)}
+.amount{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.tcard .foot{display:flex;align-items:center;gap:8px;margin-top:auto}
+.pri{width:7px;height:7px;border-radius:50%;flex:none;background:var(--text-3);display:inline-block}
+.pri.urgent{background:var(--red)} .pri.high{background:var(--amber)}
+.pri.normal{background:var(--accent)} .pri.low{background:var(--text-3)}
+.pill.red{background:var(--red-weak);color:var(--red)}
+.pill.amber{background:var(--amber-weak);color:var(--amber)}
 AIME_HEREDOC_EOF_9f2c
 
 mkdir -p "src/app/household"
@@ -5891,7 +5994,7 @@ AIME_HEREDOC_EOF_9f2c
 mkdir -p "src/lib"
 cat > "src/lib/assistant-tools.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { prisma } from "./db";
-import { getGmailClient, getCalendarClient } from "./gmail";
+import { getGmailClient, getCalendarClient, getMessageDetails } from "./gmail";
 import type { ToolDeclaration } from "./gemini";
 
 // Every executor here is scoped to a single userId and is read-only — nothing in this
@@ -5943,22 +6046,38 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
     },
   },
   {
+    name: "get_email_details",
+    description:
+      "Get the full body and any real links found in one specific email, by its Gmail message id (from a " +
+      "search_gmail result). Use this on a bill before create_task, to find the actual payment link — never " +
+      "invent a URL, only ever use one returned by this tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        messageId: { type: "string", description: "The Gmail message id, from search_gmail results." },
+      },
+      required: ["messageId"],
+    },
+  },
+  {
     name: "create_task",
     description:
-      "Add something actionable you found (a bill, an appointment to confirm, a document to sign) to the person's " +
-      "Today list, the same way AiMe's automatic background check already does. Check search_tasks first so you " +
-      "don't create a duplicate of something already tracked. If this came from a specific Gmail message, pass its " +
-      "id as sourceRef so it lines up with the background sync and never gets created twice.",
+      "Add a bill or an important message to the person's Today list, the same way AiMe's automatic background " +
+      "check already does. Check search_tasks first so you don't create a duplicate of something already tracked. " +
+      "If this came from a specific Gmail message, pass its id as sourceRef so it lines up with the background " +
+      "sync and never gets created twice. For bills, call get_email_details first and pass the real payment link " +
+      "as actionUrl if one exists.",
     parameters: {
       type: "object",
       properties: {
         title: { type: "string", description: "Short task title." },
-        type: { type: "string", enum: ["bill", "message", "document", "appointment", "task"] },
-        category: { type: "string", enum: ["personal", "work", "finance", "appointments", "purchases"] },
+        type: { type: "string", enum: ["bill", "message", "document", "task"] },
+        category: { type: "string", enum: ["personal", "work", "finance", "purchases"] },
         priority: { type: "string", enum: ["urgent", "high", "normal", "low"] },
         amount: { type: "string", description: "Amount as a plain number string, if this is a bill. Omit otherwise." },
         currency: { type: "string", description: "e.g. ILS or USD. Omit if not a bill." },
         dueDate: { type: "string", description: "ISO date (YYYY-MM-DD) if known. Omit otherwise." },
+        actionUrl: { type: "string", description: "A real payment/action link from get_email_details, if one exists. Never invent one." },
         why: { type: "string", description: "One short sentence explaining why this was created, in the source message's language." },
         sourceRef: { type: "string", description: "The Gmail message id this came from, if you have it, for dedup." },
       },
@@ -6039,6 +6158,17 @@ export function makeToolExecutor(userId: string) {
         return { count: activity.length, activity: activity.map((a) => ({ text: a.text, kind: a.kind, when: a.createdAt })) };
       }
 
+      case "get_email_details": {
+        const integration = await prisma.integration.findUnique({ where: { userId_provider: { userId, provider: "google" } } });
+        if (!integration || integration.status !== "connected") {
+          return { error: "Gmail isn't connected for this person yet." };
+        }
+        const messageId = String(args.messageId || "");
+        if (!messageId) return { error: "messageId is required" };
+        const gmail = await getGmailClient(integration);
+        return getMessageDetails(gmail, messageId);
+      }
+
       case "create_task": {
         const title = String(args.title || "").trim().slice(0, 200);
         if (!title) return { error: "title is required" };
@@ -6054,6 +6184,11 @@ export function makeToolExecutor(userId: string) {
         const dueRaw = args.dueDate ? new Date(String(args.dueDate)) : null;
         const due = dueRaw && !isNaN(dueRaw.getTime()) ? dueRaw : null;
 
+        // Only accept an actionUrl that's a real, well-formed http(s) link — cheap guard
+        // against a malformed or invented value slipping through.
+        const rawUrl = args.actionUrl ? String(args.actionUrl) : null;
+        const actionUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : null;
+
         const task = await prisma.task.upsert({
           where: { userId_sourceRef: { userId, sourceRef } },
           create: {
@@ -6068,6 +6203,7 @@ export function makeToolExecutor(userId: string) {
             amount: args.amount ? Number(args.amount) : null,
             currency: args.currency ? String(args.currency) : null,
             due,
+            actionUrl,
             why: args.why ? String(args.why) : null,
             aiSummary: args.why ? String(args.why) : null,
           },
@@ -6088,31 +6224,29 @@ export function makeToolExecutor(userId: string) {
 }
 
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
-You have tools to look up their AiMe tasks, search their Gmail, list their upcoming Calendar events, see recent automated
-activity, and add a new task. Use a tool whenever the answer depends on their actual data rather than general knowledge —
-don't guess.
+You have tools to look up their AiMe tasks, search their Gmail, get one email's full body and links, list their upcoming
+Calendar events, see recent automated activity, and add a new task. Use a tool whenever the answer depends on their actual
+data rather than general knowledge — don't guess.
 
 Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
 a substitute for checking again right now.
 
-Your job is to help keep their whole life organized, not just bills. That includes: bills and invoices, appointments to
-confirm, documents to sign, invitations or RSVPs with a deadline, reminders they or someone else mentioned, deadlines of
-any kind, and birthdays coming up in the next day or two (as a small reminder task, e.g. "Wish X a happy birthday").
-The only things that should NOT become tasks are pure marketing/promotional email and routine notifications with nothing
-to act on (e.g. a generic "5 new LinkedIn messages" digest). When in doubt about something that looks personally relevant,
-lean toward organizing it rather than skipping it.
+Scope is narrowed on purpose right now: organize bills/payments and important messages only — not appointments,
+invitations, birthdays, or generic reminders, even though those might normally be worth tracking. The only things that
+should never become tasks are pure marketing/promotional email and routine notification digests with nothing to act on.
 
-When asked to check email for anything relevant (bills, invoices, deadlines, invitations), don't rely on a single vague
-search. Gmail search only matches literal words, so run a few searches with concrete terms rather than one broad query —
-for example separate searches for: bill/invoice/payment terms (also try חשבונית, חשבון, תשלום, לתשלום since the inbox may
-be in Hebrew), appointment/confirmation terms (also תור, אישור), and invitation/RSVP terms (also הזמנה). A person saying
-"I have bills in my inbox" and not seeing them means the search missed them, not that they don't exist — search harder
-with more specific and varied terms before concluding there's nothing there.
+When asked to check email for bills, don't rely on a single vague search. Gmail search only matches literal words, so run
+a few searches with concrete terms rather than one broad query — for example bill/invoice/payment/due/receipt in English,
+and חשבונית, חשבון, תשלום, לתשלום, קבלה in Hebrew if the inbox may be in Hebrew. A person saying "I have bills in my
+inbox" and not seeing them means the search missed them, not that they don't exist — search harder before concluding
+there's nothing there.
 
-Call search_tasks first to make sure something isn't already tracked, then call create_task to add it, passing the Gmail
-message's id as sourceRef when you have one. This mirrors what AiMe's automatic background check already does on its own
-schedule, so doing it from chat needs no separate permission.
+For a bill, call get_email_details on it first to read the real body and find any payment link — only ever use a link
+that tool actually returns, never invent or guess one. Then call search_tasks to make sure it isn't already tracked, then
+create_task, passing the Gmail message's id as sourceRef and the real link as actionUrl if you found one. This mirrors
+what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
+permission.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.
@@ -6238,17 +6372,22 @@ cat > "src/lib/extract.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import type { ExtractedTask } from "./types";
 
 const SYSTEM_PROMPT = `You classify a single incoming message (an email or a chat message) for a personal
-assistant app called AiMe. Decide whether it contains something the user needs to act on or should have organized:
-a bill, an appointment to confirm, a document to sign, an invitation or RSVP with a deadline, a reminder request, a
-deadline of any kind, or a direct question waiting for a reply. Pure marketing/promotional email and routine
-notification digests with nothing to act on (e.g. "you have 5 new messages") are not actionable — but lean toward
-organizing anything that looks personally relevant rather than skipping it.
+assistant app called AiMe. Right now, scope is narrowed on purpose to two kinds of things: bills/payments, and
+important messages that genuinely need a response or action (a document to sign, a direct question awaiting a
+reply, a real deadline). Do NOT flag appointments, calendar invitations, birthdays, RSVPs, or generic reminders as
+actionable right now, even if they'd normally qualify — that's out of scope for this pass. Pure marketing/promotional
+email and routine notification digests (e.g. "you have 5 new messages") are never actionable.
+
+You may be given a list of candidate links found in the message body. If this looks like a bill and one of those
+links is plausibly the payment/action page (e.g. its text or URL path mentions pay, payment, invoice, bill, account,
+checkout), set "actionUrl" to that exact URL, copied verbatim from the list — never invent or guess a URL that
+wasn't given to you. If no candidate links were given, or none look like the right one, set "actionUrl" to null.
 
 Respond with ONLY a JSON object, no prose, no markdown fences, matching exactly this shape:
-{"isActionable": boolean, "title": string, "type": "bill"|"message"|"document"|"appointment"|"task",
- "category": "personal"|"work"|"finance"|"appointments"|"purchases",
+{"isActionable": boolean, "title": string, "type": "bill"|"message"|"document"|"task",
+ "category": "personal"|"work"|"finance"|"purchases",
  "priority": "urgent"|"high"|"normal"|"low", "amount": number|null, "currency": string|null,
- "dueDate": string|null, "whySummary": string}
+ "dueDate": string|null, "actionUrl": string|null, "whySummary": string}
 
 "whySummary" is one short sentence explaining, in plain language, what in the message caused you to
 create this task (e.g. "Contains an amount, a due date, and a payment link."). If isActionable is
@@ -6261,9 +6400,13 @@ Hebrew, respond in Hebrew; if it's in English, respond in English.`;
 // so cost and latency matter far more than raw capability for a one-sentence classification task.
 const MODEL = "claude-haiku-4-5-20251001";
 
-export async function extractTask(sourceLabel: string, text: string): Promise<ExtractedTask | null> {
+export async function extractTask(sourceLabel: string, text: string, links: string[] = []): Promise<ExtractedTask | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
+
+  const linksBlock = links.length
+    ? `\n\nCandidate links found in this message:\n${links.map((l) => `- ${l}`).join("\n")}`
+    : "";
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -6274,9 +6417,9 @@ export async function extractTask(sourceLabel: string, text: string): Promise<Ex
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 300,
+      max_tokens: 400,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `Source: ${sourceLabel}\n\nMessage:\n${text.slice(0, 4000)}` }],
+      messages: [{ role: "user", content: `Source: ${sourceLabel}\n\nMessage:\n${text.slice(0, 4000)}${linksBlock}` }],
     }),
   });
 
@@ -6291,6 +6434,11 @@ export async function extractTask(sourceLabel: string, text: string): Promise<Ex
 
   try {
     const parsed = JSON.parse(cleaned) as ExtractedTask;
+    // Guard against a hallucinated URL slipping through despite the instruction —
+    // only keep actionUrl if it's one of the links we actually gave the model.
+    if (parsed.actionUrl && !links.includes(parsed.actionUrl)) {
+      parsed.actionUrl = null;
+    }
     return parsed;
   } catch {
     console.error("Could not parse extraction response:", raw);
@@ -6363,7 +6511,7 @@ export async function chatWithTools(
   tools: ToolDeclaration[],
   executeTool: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>,
   systemText: string,
-  maxRounds = 10
+  maxRounds = 20
 ): Promise<{ reply: string; toolCalls: { name: string; args: unknown }[] }> {
   const contents = [...history];
   const toolCalls: { name: string; args: unknown }[] = [];
@@ -6439,13 +6587,41 @@ export async function getCalendarClient(integration: Integration) {
   return google.calendar({ version: "v3", auth: oauth2Client });
 }
 
-// A narrow, cheap-to-run keyword prefilter so we only spend an AI call on
-// messages that plausibly contain a bill, appointment, or deadline — not on
-// every newsletter in the inbox.
+// Narrowed on purpose for now, per explicit request: bills/payments and important
+// messages only — not appointments, invitations, birthdays, or generic reminders.
 const CANDIDATE_QUERY =
-  '(bill OR invoice OR payment OR due OR appointment OR confirm OR receipt OR "sign" OR deadline OR ' +
-  'invite OR invitation OR RSVP OR reminder OR ' +
-  'חשבונית OR חשבון OR תשלום OR לתשלום OR תור OR פגישה OR קבלה OR אישור OR חתימה OR "מועד אחרון" OR הזמנה)';
+  '(bill OR invoice OR payment OR due OR receipt OR "sign" OR deadline OR ' +
+  'חשבונית OR חשבון OR תשלום OR לתשלום OR קבלה OR חתימה OR "מועד אחרון")';
+
+function decodeBase64Url(data?: string | null): string {
+  if (!data) return "";
+  return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8");
+}
+
+// Walks a Gmail MIME payload to find readable body text, preferring plain text
+// over HTML since HTML markup just adds noise for both link-extraction and the AI.
+function extractBodyText(payload: any): string {
+  if (!payload) return "";
+  if (payload.body?.data) return decodeBase64Url(payload.body.data);
+  const parts: any[] = payload.parts || [];
+  const plain = parts.find((p) => p.mimeType === "text/plain");
+  if (plain?.body?.data) return decodeBase64Url(plain.body.data);
+  const html = parts.find((p) => p.mimeType === "text/html");
+  if (html?.body?.data) return decodeBase64Url(html.body.data);
+  for (const p of parts) {
+    const nested = extractBodyText(p);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+// Pulls real URLs out of the body so the AI only ever picks from links that
+// genuinely exist in the email, rather than inventing one.
+export function extractLinks(bodyText: string, max = 10): string[] {
+  const matches = bodyText.match(/https?:\/\/[^\s"'<>\)]+/g) ?? [];
+  const cleaned = matches.map((u) => u.replace(/[.,;]+$/, ""));
+  return Array.from(new Set(cleaned)).slice(0, max);
+}
 
 export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
   const list = await gmail.users.messages.list({
@@ -6459,21 +6635,37 @@ export async function listCandidateMessages(gmail: gmail_v1.Gmail, max = 30) {
       const full = await gmail.users.messages.get({
         userId: "me",
         id: m.id!,
-        format: "metadata",
-        metadataHeaders: ["Subject", "From", "Date"],
+        format: "full",
       });
       const headers = full.data.payload?.headers ?? [];
       const get = (name: string) => headers.find((h) => h.name === name)?.value ?? "";
+      const bodyText = extractBodyText(full.data.payload);
       return {
         id: m.id!,
         subject: get("Subject"),
         from: get("From"),
         date: get("Date"),
         snippet: full.data.snippet ?? "",
+        bodyText: bodyText.replace(/\r/g, "").slice(0, 4000),
+        links: extractLinks(bodyText),
       };
     })
   );
   return messages;
+}
+
+export async function getMessageDetails(gmail: gmail_v1.Gmail, messageId: string) {
+  const full = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
+  const headers = full.data.payload?.headers ?? [];
+  const get = (name: string) => headers.find((h) => h.name === name)?.value ?? "";
+  const bodyText = extractBodyText(full.data.payload);
+  return {
+    subject: get("Subject"),
+    from: get("From"),
+    date: get("Date"),
+    bodyText: bodyText.replace(/\r/g, "").slice(0, 4000),
+    links: extractLinks(bodyText),
+  };
 }
 
 // The label a dismissed task's source email gets moved into. Gmail doesn't have real
@@ -6572,6 +6764,13 @@ const DICT = {
   loading: { en: "Loading…", he: "טוען…" },
   complete: { en: "Complete", he: "בוצע" },
   completed: { en: "Completed", he: "הושלם" },
+  dismiss: { en: "Dismiss", he: "התעלם" },
+  openEmail: { en: "Open email", he: "פתח מייל" },
+  overdue: { en: "Overdue", he: "באיחור" },
+  dueToday: { en: "Due today", he: "מועד היום" },
+  dueTomorrow: { en: "Due tomorrow", he: "מועד מחר" },
+  sittingAWhile: { en: "Been sitting a while", he: "ממתין כבר זמן מה" },
+  needsAttention: { en: "Needs attention", he: "דורש תשומת לב" },
 } satisfies Record<string, Record<Lang, string>>;
 
 export type DictKey = keyof typeof DICT;
@@ -6623,12 +6822,13 @@ cat > "src/lib/types.ts" << 'AIME_HEREDOC_EOF_9f2c'
 export type ExtractedTask = {
   isActionable: boolean;
   title?: string;
-  type?: "bill" | "message" | "document" | "appointment" | "task";
-  category?: "personal" | "work" | "finance" | "appointments" | "purchases";
+  type?: "bill" | "message" | "document" | "task";
+  category?: "personal" | "work" | "finance" | "purchases";
   priority?: "urgent" | "high" | "normal" | "low";
   amount?: number;
   currency?: string;
   dueDate?: string; // ISO date, if present
+  actionUrl?: string | null; // a real link copied from the source message, e.g. a payment page
   whySummary?: string; // one sentence, shown to the user as "why AiMe created this"
 };
 AIME_HEREDOC_EOF_9f2c
