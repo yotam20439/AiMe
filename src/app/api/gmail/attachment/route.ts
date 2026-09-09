@@ -27,7 +27,7 @@ export async function GET(req: Request) {
   try {
     const gmail = await getGmailClient(integration);
     const bytes = await getAttachmentBytes(gmail, messageId, attachmentId);
-    return new NextResponse(bytes, {
+    return new NextResponse(new Uint8Array(bytes), {
       headers: {
         "content-type": mimeType,
         "content-disposition": `inline; filename="${filename}"`,
