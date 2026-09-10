@@ -32,7 +32,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${lang === "he" ? " side-right" : ""}`}>
       <aside className={`app-sidebar${collapsed ? " collapsed" : ""}`}>
         <div className="app-sidebar-top">
           <button className="app-brand" onClick={() => router.push("/dashboard")} aria-label="AiMe">

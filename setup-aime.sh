@@ -5568,7 +5568,7 @@ html[dir="rtl"] .seg{flex-direction:row-reverse}
 .tcard .why{font-size:12.8px;color:var(--text-2);margin:0;padding-left:10px;border-left:2px solid var(--border)}
 html[dir="rtl"] .tcard .why{padding-left:0;border-left:none;padding-right:10px;border-right:2px solid var(--border)}
 .amount{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.tcard .foot{display:flex;align-items:center;gap:8px;margin-top:auto}
+.tcard .foot{display:flex;align-items:center;gap:8px;margin-top:auto;direction:ltr}
 .pri{width:7px;height:7px;border-radius:50%;flex:none;background:var(--text-3);display:inline-block}
 .pri.urgent{background:var(--red)} .pri.high{background:var(--amber)}
 .pri.normal{background:var(--accent)} .pri.low{background:var(--text-3)}
@@ -5583,17 +5583,22 @@ html[dir="rtl"] .tcard .why{padding-left:0;border-left:none;padding-right:10px;b
 .attach-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- app shell / sidebar ---------- */
-.app-shell{display:flex;min-height:100vh}
-/* Flipping flex-direction puts the sidebar on the right for Hebrew, left for English —
-   same trick used everywhere else in this file for RTL, no separate positioning logic needed. */
-html[dir="rtl"] .app-shell{flex-direction:row-reverse}
+/* Deliberately not using flex-direction:row-reverse here — that depends on how the
+   browser interprets flex main-axis direction under dir="rtl", which turned out to
+   be inconsistent with what was expected. Explicit physical left/right, chosen by
+   JS based on language, is unambiguous regardless of browser RTL behavior. */
+.app-shell{position:relative;min-height:100vh}
 .app-sidebar{
-  width:212px;flex:none;background:var(--surface-2);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;height:100vh;position:sticky;top:0;padding:12px 8px;
-  transition:width .15s ease;
+  position:fixed;top:0;left:0;width:212px;height:100vh;z-index:10;
+  background:var(--surface-2);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;padding:12px 8px;transition:width .15s ease;
 }
-html[dir="rtl"] .app-sidebar{border-right:none;border-left:1px solid var(--border)}
+.app-shell.side-right .app-sidebar{left:auto;right:0;border-right:none;border-left:1px solid var(--border)}
 .app-sidebar.collapsed{width:60px}
+.app-main{margin-left:212px;min-height:100vh;transition:margin .15s ease}
+.app-shell.side-right .app-main{margin-left:0;margin-right:212px}
+.app-shell:not(.side-right) .app-sidebar.collapsed ~ .app-main{margin-left:60px}
+.app-shell.side-right .app-sidebar.collapsed ~ .app-main{margin-right:60px}
 .app-sidebar-top{display:flex;align-items:center;gap:6px;padding:6px 4px 14px}
 .app-brand{display:flex;align-items:center;gap:8px;background:none;border:none;cursor:pointer;padding:4px;flex:1;min-width:0}
 .app-brand img{width:22px;height:22px;border-radius:6px;flex:none}
@@ -5611,14 +5616,12 @@ html[dir="rtl"] .app-nav-item{text-align:right}
 .app-nav-ic{display:flex;flex:none}
 .app-sidebar-bottom{margin-top:auto;display:flex;flex-direction:column;gap:4px;padding-top:10px;border-top:1px solid var(--border)}
 .app-user-name{font-size:12px;color:var(--text-3);padding:4px 10px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.app-main{flex:1;min-width:0}
 
 @media (max-width:820px){
-  .app-sidebar{position:fixed;z-index:30;width:60px}
-  .app-sidebar:not(.collapsed){width:60px}
+  .app-sidebar{width:60px}
   .app-sidebar .lbl,.app-brand b,.app-user-name{display:none}
   .app-main{margin-left:60px}
-  html[dir="rtl"] .app-main{margin-left:0;margin-right:60px}
+  .app-shell.side-right .app-main{margin-left:0;margin-right:60px}
   .app-collapse-btn{display:none}
 }
 @media (max-width:640px){
@@ -6127,7 +6130,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${lang === "he" ? " side-right" : ""}`}>
       <aside className={`app-sidebar${collapsed ? " collapsed" : ""}`}>
         <div className="app-sidebar-top">
           <button className="app-brand" onClick={() => router.push("/dashboard")} aria-label="AiMe">
