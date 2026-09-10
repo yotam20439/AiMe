@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+bash setup-aime.sh#!/usr/bin/env bash
 set -e
 echo "Creating AiMe project files..."
 
@@ -3231,6 +3231,8 @@ cat > "src/app/api/admin/fix-sources/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 // Protected the same way as the cron endpoint. Safe to run more than once — it only
 // ever touches rows still carrying the old bug's signature (source:'chat' with a
 // sourceRef that isn't one of chat's own synthetic keys).
@@ -3370,8 +3372,9 @@ mkdir -p "src/app/api/cron/sync"
 cat > "src/app/api/cron/sync/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getGmailClient, listCandidateMessages } from "@/lib/gmail";
-import { extractTask } from "@/lib/extract";
+import { scanGmailForIntegration } from "@/lib/scan";
+
+export const dynamic = "force-dynamic";
 
 // Registered in vercel.json to run on a schedule. Vercel signs cron requests with
 // an Authorization header matching CRON_SECRET — anyone else calling this gets 401.
@@ -3393,54 +3396,12 @@ export async function GET(req: Request) {
 
   for (const integration of integrations) {
     try {
-      const gmail = await getGmailClient(integration);
-      const messages = await listCandidateMessages(gmail);
-      matchedCount += messages.length;
-
-      for (const msg of messages) {
-        // Already turned into a task on a previous run — skip without spending an AI call.
-        const existing = await prisma.task.findUnique({
-          where: { userId_sourceRef: { userId: integration.userId, sourceRef: msg.id } },
-        });
-        if (existing) { alreadyTrackedCount++; continue; }
-
-        const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.bodyText || msg.snippet}`;
-        const extracted = await extractTask("Gmail", text, msg.links);
-        if (!extracted?.isActionable) {
-          notActionableCount++;
-          if (notActionableSample.length < 5) notActionableSample.push({ subject: msg.subject, from: msg.from });
-          continue;
-        }
-
-        const user = await prisma.user.findUnique({ where: { id: integration.userId } });
-        if (!user) continue;
-
-        await prisma.task.create({
-          data: {
-            userId: user.id,
-            householdId: user.householdId,
-            sourceRef: msg.id,
-            source: "gmail",
-            title: extracted.title || msg.subject,
-            type: extracted.type || "task",
-            category: extracted.category || "personal",
-            priority: extracted.priority || "normal",
-            amount: extracted.amount ?? null,
-            currency: extracted.currency ?? null,
-            due: extracted.dueDate ? new Date(extracted.dueDate) : null,
-            actionUrl: extracted.actionUrl ?? null,
-            emailDate: msg.date && !isNaN(new Date(msg.date).getTime()) ? new Date(msg.date) : null,
-            aiSummary: extracted.whySummary || null,
-            why: `Found in an email from ${msg.from}, subject "${msg.subject}".`,
-          },
-        });
-        await prisma.activityEvent.create({
-          data: { userId: user.id, text: `Found "${extracted.title || msg.subject}" in Gmail.`, kind: "tasks" },
-        });
-        created++;
-      }
-
-      await prisma.integration.update({ where: { id: integration.id }, data: { lastSyncAt: new Date() } });
+      const result = await scanGmailForIntegration(integration);
+      created += result.tasksCreated;
+      matchedCount += result.candidateMessagesMatched;
+      notActionableCount += result.judgedNotActionable;
+      alreadyTrackedCount += result.alreadyTracked;
+      notActionableSample.push(...result.notActionableSample.slice(0, Math.max(0, 5 - notActionableSample.length)));
     } catch (err) {
       console.error(`Sync failed for integration ${integration.id}`, err);
       await prisma.integration.update({ where: { id: integration.id }, data: { status: "error" } }).catch(() => {});
@@ -3454,7 +3415,7 @@ export async function GET(req: Request) {
     alreadyTracked: alreadyTrackedCount,
     judgedNotActionable: notActionableCount,
     tasksCreated: created,
-    notActionableSample, // subjects the AI looked at but decided weren't worth a task — useful for tuning
+    notActionableSample,
   });
 }
 AIME_HEREDOC_EOF_9f2c
@@ -4010,6 +3971,45 @@ export async function POST(req: Request) {
     data: { name, email: normalizedEmail, passwordHash, householdId: household.id, role: "owner" },
   });
   return NextResponse.json({ ok: true, userId: user.id, inviteCode: household.inviteCode });
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/app/api/sync/me"
+cat > "src/app/api/sync/me/route.ts" << 'AIME_HEREDOC_EOF_9f2c'
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { scanGmailForIntegration } from "@/lib/scan";
+
+// Called automatically when Today loads. Reuses the exact same reliable pipeline
+// as the scheduled cron job, just scoped to one person and triggered by a page
+// visit instead of a timer.
+const COOLDOWN_MS = 5 * 60 * 1000;
+
+export async function POST() {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  const userId = (session.user as any).id;
+
+  const integration = await prisma.integration.findUnique({
+    where: { userId_provider: { userId, provider: "google" } },
+  });
+  if (!integration || integration.status !== "connected") {
+    return NextResponse.json({ skipped: true, reason: "not-connected" });
+  }
+
+  if (integration.lastSyncAt && Date.now() - integration.lastSyncAt.getTime() < COOLDOWN_MS) {
+    return NextResponse.json({ skipped: true, reason: "cooldown", lastSyncAt: integration.lastSyncAt });
+  }
+
+  try {
+    const result = await scanGmailForIntegration(integration);
+    return NextResponse.json({ skipped: false, ...result });
+  } catch (err: any) {
+    console.error("Auto-sync on load failed:", err);
+    return NextResponse.json({ error: err?.message || "Sync failed" }, { status: 500 });
+  }
 }
 AIME_HEREDOC_EOF_9f2c
 
@@ -4772,6 +4772,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [attachments, setAttachments] = useState<Record<string, Attachment[] | "loading">>({});
 
@@ -4783,7 +4784,22 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Fire-and-forget: shows existing tasks immediately, then quietly checks for new
+    // ones in the background rather than making the person click "Check now" first.
+    setSyncing(true);
+    fetch("/api/sync/me", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.tasksCreated > 0) {
+          setNotice(`Found ${d.tasksCreated} new item${d.tasksCreated === 1 ? "" : "s"} in your inbox.`);
+          load();
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSyncing(false));
+  }, []);
 
   async function toggleExpand(tk: Task) {
     const willOpen = !expandedIds.has(tk.id);
@@ -4830,6 +4846,7 @@ export default function Dashboard() {
       <div className="content" style={{ maxWidth: 1080 }}>
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
         {notice && <div className="error">{notice}</div>}
+        {syncing && <p style={{ color: "var(--text-3)", fontSize: 12.5, margin: "0 0 12px" }}>Checking your inbox…</p>}
 
         {loading ? (
           <p style={{ color: "var(--text-2)" }}>{t("loading")}</p>
@@ -6297,6 +6314,7 @@ mkdir -p "src/lib"
 cat > "src/lib/assistant-tools.ts" << 'AIME_HEREDOC_EOF_9f2c'
 import { prisma } from "./db";
 import { getGmailClient, getCalendarClient, getMessageDetails } from "./gmail";
+import { scanGmailForIntegration } from "./scan";
 import type { ToolDeclaration } from "./gemini";
 
 // Every executor here is scoped to a single userId and is read-only — nothing in this
@@ -6336,6 +6354,16 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
         daysAhead: { type: "string", description: "How many days ahead to look, default 7." },
       },
     },
+  },
+  {
+    name: "run_email_scan",
+    description:
+      "The reliable way to check Gmail for bills and important messages, and actually add them to Today. This runs " +
+      "the exact same process as AiMe's scheduled background check: it searches, reads each candidate email, and " +
+      "creates properly-linked tasks itself — you don't need to call search_gmail, get_email_details, or create_task " +
+      "yourself for this. Always use this tool (not manual searching) whenever asked to check for bills or scan the " +
+      "inbox, since it guarantees every task it creates has a working link back to its email. Takes no arguments.",
+    parameters: { type: "object", properties: {} },
   },
   {
     name: "get_recent_activity",
@@ -6455,6 +6483,19 @@ export function makeToolExecutor(userId: string) {
         return { count: events.length, events };
       }
 
+      case "run_email_scan": {
+        const integration = await prisma.integration.findUnique({ where: { userId_provider: { userId, provider: "google" } } });
+        if (!integration || integration.status !== "connected") {
+          return { error: "Gmail isn't connected for this person yet." };
+        }
+        try {
+          const result = await scanGmailForIntegration(integration);
+          return result;
+        } catch (err: any) {
+          return { error: err?.message || "The scan failed." };
+        }
+      }
+
       case "get_recent_activity": {
         const limit = Math.min(Number(args.limit) || 10, 25);
         const activity = await prisma.activityEvent.findMany({
@@ -6534,9 +6575,9 @@ export function makeToolExecutor(userId: string) {
 }
 
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
-You have tools to look up their AiMe tasks, search their Gmail, get one email's full body and links, list their upcoming
-Calendar events, see recent automated activity, and add a new task. Use a tool whenever the answer depends on their actual
-data rather than general knowledge — don't guess.
+You have tools to look up their AiMe tasks, run a reliable scan of their Gmail that creates properly-linked tasks itself,
+search Gmail manually, get one email's full body and links, list their upcoming Calendar events, and see recent
+automated activity. Use a tool whenever the answer depends on their actual data rather than general knowledge — don't guess.
 
 Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
@@ -6546,22 +6587,16 @@ Scope is narrowed on purpose right now: organize bills/payments and important me
 invitations, birthdays, or generic reminders, even though those might normally be worth tracking. The only things that
 should never become tasks are pure marketing/promotional email and routine notification digests with nothing to act on.
 
-When asked to check email for bills, don't rely on a single vague search. Gmail search only matches literal words, so run
-a few searches with concrete terms rather than one broad query — for example bill/invoice/payment/due/receipt in English,
-and חשבונית, חשבון, תשלום, לתשלום, קבלה in Hebrew if the inbox may be in Hebrew. A person saying "I have bills in my
-inbox" and not seeing them means the search missed them, not that they don't exist — search harder before concluding
-there's nothing there.
+Whenever asked to check for bills, check the inbox, or "check now" — call run_email_scan. Don't try to reconstruct that
+process yourself with search_gmail, get_email_details, and create_task; that manual path has repeatedly produced tasks
+with no working link back to their email, because it depends on correctly carrying an id across several separate steps.
+run_email_scan does the searching, reading, and task-creation itself in one reliable step, and always produces a task
+that can actually be opened and acted on. After calling it, summarize what it found and created using its result.
 
-For a bill, call get_email_details on it first to read the real body and find any payment link — only ever use a link
-that tool actually returns, never invent or guess one. Then call search_tasks to make sure it isn't already tracked, then
-create_task, passing the Gmail message's id as sourceRef, the email's actual sent date (from get_email_details or the
-search result) as emailDate, and the real link as actionUrl if you found one. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
-permission.
-
-Non-negotiable rule: search_gmail already gives you each message's real id in its results, at zero extra cost. Any time
-you call create_task for something found in an email, sourceRef must be that id — not skipped, not left out to save a
-step. A task with no sourceRef has no way to link back to the email at all, which makes it something the person can only
-mark done or ignore, never actually act on. That defeats the entire point, so never create an email-derived task without it.
+The manual search_gmail / get_email_details / create_task tools still exist for genuinely different questions — e.g. "did
+David email me about the trip" or "add a task for that thing Sarah asked about" — where the person is pointing you at a
+specific message rather than asking for a general inbox check. Even then, if you do create a task from an email this way,
+sourceRef must be that message's real id from search_gmail's results — never omit it, never invent one.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.
@@ -7208,6 +7243,95 @@ export function hashPassword(plain: string): Promise<string> {
 
 export function verifyPassword(plain: string, hash: string): Promise<boolean> {
   return bcrypt.compare(plain, hash);
+}
+AIME_HEREDOC_EOF_9f2c
+
+mkdir -p "src/lib"
+cat > "src/lib/scan.ts" << 'AIME_HEREDOC_EOF_9f2c'
+import { prisma } from "./db";
+import { getGmailClient, listCandidateMessages } from "./gmail";
+import { extractTask } from "./extract";
+import type { Integration } from "@prisma/client";
+
+export type ScanResult = {
+  candidateMessagesMatched: number;
+  alreadyTracked: number;
+  judgedNotActionable: number;
+  tasksCreated: number;
+  createdTitles: string[];
+  notActionableSample: { subject: string; from: string }[];
+};
+
+// Scans one person's connected Gmail for bills/important messages and creates tasks
+// for whatever's actually actionable. This is the single place sourceRef gets set —
+// always the real Gmail message id, always correct, because it's set here in code
+// rather than trusted to an AI's memory across several tool-call steps.
+export async function scanGmailForIntegration(integration: Integration): Promise<ScanResult> {
+  let created = 0;
+  let matchedCount = 0;
+  let notActionableCount = 0;
+  let alreadyTrackedCount = 0;
+  const createdTitles: string[] = [];
+  const notActionableSample: { subject: string; from: string }[] = [];
+
+  const gmail = await getGmailClient(integration);
+  const messages = await listCandidateMessages(gmail);
+  matchedCount += messages.length;
+
+  for (const msg of messages) {
+    const existing = await prisma.task.findUnique({
+      where: { userId_sourceRef: { userId: integration.userId, sourceRef: msg.id } },
+    });
+    if (existing) { alreadyTrackedCount++; continue; }
+
+    const text = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.bodyText || msg.snippet}`;
+    const extracted = await extractTask("Gmail", text, msg.links);
+    if (!extracted?.isActionable) {
+      notActionableCount++;
+      if (notActionableSample.length < 5) notActionableSample.push({ subject: msg.subject, from: msg.from });
+      continue;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: integration.userId } });
+    if (!user) continue;
+
+    const title = extracted.title || msg.subject;
+    await prisma.task.create({
+      data: {
+        userId: user.id,
+        householdId: user.householdId,
+        sourceRef: msg.id,
+        source: "gmail",
+        title,
+        type: extracted.type || "task",
+        category: extracted.category || "personal",
+        priority: extracted.priority || "normal",
+        amount: extracted.amount ?? null,
+        currency: extracted.currency ?? null,
+        due: extracted.dueDate ? new Date(extracted.dueDate) : null,
+        actionUrl: extracted.actionUrl ?? null,
+        emailDate: msg.date && !isNaN(new Date(msg.date).getTime()) ? new Date(msg.date) : null,
+        aiSummary: extracted.whySummary || null,
+        why: `Found in an email from ${msg.from}, subject "${msg.subject}".`,
+      },
+    });
+    await prisma.activityEvent.create({
+      data: { userId: user.id, text: `Found "${title}" in Gmail.`, kind: "tasks" },
+    });
+    created++;
+    createdTitles.push(title);
+  }
+
+  await prisma.integration.update({ where: { id: integration.id }, data: { lastSyncAt: new Date() } });
+
+  return {
+    candidateMessagesMatched: matchedCount,
+    alreadyTracked: alreadyTrackedCount,
+    judgedNotActionable: notActionableCount,
+    tasksCreated: created,
+    createdTitles,
+    notActionableSample,
+  };
 }
 AIME_HEREDOC_EOF_9f2c
 

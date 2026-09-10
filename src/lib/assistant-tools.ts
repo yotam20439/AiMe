@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { getGmailClient, getCalendarClient, getMessageDetails } from "./gmail";
+import { scanGmailForIntegration } from "./scan";
 import type { ToolDeclaration } from "./gemini";
 
 // Every executor here is scoped to a single userId and is read-only — nothing in this
@@ -39,6 +40,16 @@ export const ASSISTANT_TOOLS: ToolDeclaration[] = [
         daysAhead: { type: "string", description: "How many days ahead to look, default 7." },
       },
     },
+  },
+  {
+    name: "run_email_scan",
+    description:
+      "The reliable way to check Gmail for bills and important messages, and actually add them to Today. This runs " +
+      "the exact same process as AiMe's scheduled background check: it searches, reads each candidate email, and " +
+      "creates properly-linked tasks itself — you don't need to call search_gmail, get_email_details, or create_task " +
+      "yourself for this. Always use this tool (not manual searching) whenever asked to check for bills or scan the " +
+      "inbox, since it guarantees every task it creates has a working link back to its email. Takes no arguments.",
+    parameters: { type: "object", properties: {} },
   },
   {
     name: "get_recent_activity",
@@ -158,6 +169,19 @@ export function makeToolExecutor(userId: string) {
         return { count: events.length, events };
       }
 
+      case "run_email_scan": {
+        const integration = await prisma.integration.findUnique({ where: { userId_provider: { userId, provider: "google" } } });
+        if (!integration || integration.status !== "connected") {
+          return { error: "Gmail isn't connected for this person yet." };
+        }
+        try {
+          const result = await scanGmailForIntegration(integration);
+          return result;
+        } catch (err: any) {
+          return { error: err?.message || "The scan failed." };
+        }
+      }
+
       case "get_recent_activity": {
         const limit = Math.min(Number(args.limit) || 10, 25);
         const activity = await prisma.activityEvent.findMany({
@@ -237,9 +261,9 @@ export function makeToolExecutor(userId: string) {
 }
 
 export const ASSISTANT_SYSTEM_PROMPT = `You are the AiMe assistant, chatting directly with the person whose account this is.
-You have tools to look up their AiMe tasks, search their Gmail, get one email's full body and links, list their upcoming
-Calendar events, see recent automated activity, and add a new task. Use a tool whenever the answer depends on their actual
-data rather than general knowledge — don't guess.
+You have tools to look up their AiMe tasks, run a reliable scan of their Gmail that creates properly-linked tasks itself,
+search Gmail manually, get one email's full body and links, list their upcoming Calendar events, and see recent
+automated activity. Use a tool whenever the answer depends on their actual data rather than general knowledge — don't guess.
 
 Always call the relevant tool fresh for the current question, even if you or the person discussed something similar earlier
 in this conversation. Email and calendar contents can change between messages, so an earlier answer in this chat is never
@@ -249,22 +273,16 @@ Scope is narrowed on purpose right now: organize bills/payments and important me
 invitations, birthdays, or generic reminders, even though those might normally be worth tracking. The only things that
 should never become tasks are pure marketing/promotional email and routine notification digests with nothing to act on.
 
-When asked to check email for bills, don't rely on a single vague search. Gmail search only matches literal words, so run
-a few searches with concrete terms rather than one broad query — for example bill/invoice/payment/due/receipt in English,
-and חשבונית, חשבון, תשלום, לתשלום, קבלה in Hebrew if the inbox may be in Hebrew. A person saying "I have bills in my
-inbox" and not seeing them means the search missed them, not that they don't exist — search harder before concluding
-there's nothing there.
+Whenever asked to check for bills, check the inbox, or "check now" — call run_email_scan. Don't try to reconstruct that
+process yourself with search_gmail, get_email_details, and create_task; that manual path has repeatedly produced tasks
+with no working link back to their email, because it depends on correctly carrying an id across several separate steps.
+run_email_scan does the searching, reading, and task-creation itself in one reliable step, and always produces a task
+that can actually be opened and acted on. After calling it, summarize what it found and created using its result.
 
-For a bill, call get_email_details on it first to read the real body and find any payment link — only ever use a link
-that tool actually returns, never invent or guess one. Then call search_tasks to make sure it isn't already tracked, then
-create_task, passing the Gmail message's id as sourceRef, the email's actual sent date (from get_email_details or the
-search result) as emailDate, and the real link as actionUrl if you found one. This mirrors what AiMe's automatic background check already does on its own schedule, so doing it from chat needs no separate
-permission.
-
-Non-negotiable rule: search_gmail already gives you each message's real id in its results, at zero extra cost. Any time
-you call create_task for something found in an email, sourceRef must be that id — not skipped, not left out to save a
-step. A task with no sourceRef has no way to link back to the email at all, which makes it something the person can only
-mark done or ignore, never actually act on. That defeats the entire point, so never create an email-derived task without it.
+The manual search_gmail / get_email_details / create_task tools still exist for genuinely different questions — e.g. "did
+David email me about the trip" or "add a task for that thing Sarah asked about" — where the person is pointing you at a
+specific message rather than asking for a general inbox check. Even then, if you do create a task from an email this way,
+sourceRef must be that message's real id from search_gmail's results — never omit it, never invent one.
 
 You cannot send emails, create calendar events, pay bills, or change an existing task's status; if asked to do one of
 those, tell them to use the relevant button in the app instead of pretending to do it yourself.

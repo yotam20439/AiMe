@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 // Protected the same way as the cron endpoint. Safe to run more than once — it only
 // ever touches rows still carrying the old bug's signature (source:'chat' with a
 // sourceRef that isn't one of chat's own synthetic keys).

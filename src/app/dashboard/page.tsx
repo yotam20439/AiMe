@@ -70,6 +70,7 @@ export default function Dashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [attachments, setAttachments] = useState<Record<string, Attachment[] | "loading">>({});
 
@@ -81,7 +82,22 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Fire-and-forget: shows existing tasks immediately, then quietly checks for new
+    // ones in the background rather than making the person click "Check now" first.
+    setSyncing(true);
+    fetch("/api/sync/me", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.tasksCreated > 0) {
+          setNotice(`Found ${d.tasksCreated} new item${d.tasksCreated === 1 ? "" : "s"} in your inbox.`);
+          load();
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSyncing(false));
+  }, []);
 
   async function toggleExpand(tk: Task) {
     const willOpen = !expandedIds.has(tk.id);
@@ -128,6 +144,7 @@ export default function Dashboard() {
       <div className="content" style={{ maxWidth: 1080 }}>
         <h1 style={{ fontSize: 26, letterSpacing: "-.02em" }}>{t("today")}</h1>
         {notice && <div className="error">{notice}</div>}
+        {syncing && <p style={{ color: "var(--text-3)", fontSize: 12.5, margin: "0 0 12px" }}>Checking your inbox…</p>}
 
         {loading ? (
           <p style={{ color: "var(--text-2)" }}>{t("loading")}</p>
